@@ -109,9 +109,15 @@ pub fn generate_training_script(g: &ValidatedGraph, graph_id: &str) -> Result<St
     let feats = t.data.features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ");
     let bs = t.batch_size.map(|b| b.to_string()).unwrap_or_else(|| "len(xtr)".into());
     let model_code = generate_model(g);
+    // Record the model's resolved hyperparameters so runs can be compared by them.
+    let model_params: serde_json::Map<String, serde_json::Value> = g
+        .order
+        .iter()
+        .map(|n| (n.clone(), serde_json::to_value(&g.params[n]).unwrap_or_default()))
+        .collect();
     let cfg = serde_json::to_string(&serde_json::json!({
         "graph": graph_id, "loss": t.loss, "optimizer": t.optimizer, "lr": t.lr,
-        "epochs": t.epochs, "batch_size": t.batch_size,
+        "epochs": t.epochs, "batch_size": t.batch_size, "model": model_params,
     }))
     .unwrap();
 

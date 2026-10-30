@@ -4,6 +4,7 @@ import { usePoll, useTelemetry } from './hooks';
 import { ToastProvider } from './ui';
 import { Overview } from './pages/Overview';
 import { Runs } from './pages/Runs';
+import { Experiments } from './pages/Experiments';
 import { Sweeps } from './pages/Sweeps';
 import { Components } from './pages/Components';
 import { Builder } from './builder/Builder';
@@ -14,6 +15,7 @@ import { Code } from './pages/Code';
 const TABS = [
   { id: 'overview', label: 'Overview', group: 'Workspace' },
   { id: 'runs', label: 'Runs', group: 'Workspace' },
+  { id: 'experiments', label: 'Experiments', group: 'Workspace' },
   { id: 'sweeps', label: 'Sweeps', group: 'Workspace' },
   { id: 'components', label: 'Components', group: 'Project' },
   { id: 'builder', label: 'Builder', group: 'Project' },
@@ -84,6 +86,7 @@ export function App() {
           <main className={'content' + (tab === 'builder' || tab === 'code' ? ' fill' : '')}>
             {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} />}
             {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} />}
+            {tab === 'experiments' && <Experiments />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}
             {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInBuilder={openInBuilder} />}
             {tab === 'builder' && <Builder initialComponent={builderComponent} onConsumed={() => setBuilderComponent(null)} refreshJobs={jobs.refresh} go={go} />}

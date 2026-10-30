@@ -104,3 +104,6 @@ textarea.viewer { width: 100%; height: 100%; background: #050505; border: 1px so
   .react-flow__minimap { display: none; }
   .sidebar { width: 190px; }
 }
+.grid.charts { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 11px; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }

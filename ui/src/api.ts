@@ -73,6 +73,17 @@ export interface RepoStatus {
   lock_file_found: boolean;
   convert_commands: string[];
 }
+export interface MetricPoint { step: number; value: number; timestamp: number }
+export interface TrackedRun {
+  run_id: string;
+  experiment_id: string;
+  run_name: string;
+  status: 'running' | 'finished' | 'failed' | 'killed' | 'unknown';
+  start_time: number | null;
+  end_time: number | null;
+  params: Record<string, string>;
+  latest: Record<string, number>;
+}
 export interface BlockParam {
   name: string;
   required: boolean;
@@ -162,6 +173,8 @@ export const api = {
   removeDataset: (name: string) => req<unknown>(`/api/datasets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   files: () => req<{ name: string; path: string }[]>('/api/files'),
   file: (path: string) => req<{ content: string; path: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
+  trackedRuns: () => req<TrackedRun[]>('/api/tracking/runs'),
+  trackedRun: (id: string) => req<{ run: TrackedRun; metrics: Record<string, MetricPoint[]> }>(`/api/tracking/runs/${id}`),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
   validate: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) =>
     post<ValidateOk | ApiErr>('/api/graph/validate', b).catch((e: Error) => ({ ok: false, error: e.message }) as ApiErr),

@@ -227,3 +227,15 @@ fn generated_models_run_forward_in_pytorch() {
         );
     }
 }
+
+#[test]
+fn training_script_logs_model_hyperparameters() {
+    let r = registry();
+    let c = r.get("tabular/ann-classifier@v1").unwrap();
+    let mut ov = HashMap::new();
+    ov.insert("hidden".to_string(), serde_yaml::Value::from(7));
+    let g = c.build_graph(&ov).unwrap();
+    let script = generate_training_script(&g, "tabular/ann-classifier@v1").unwrap();
+    // fc1.out must be recorded with the run so runs can be compared by their hyperparameters
+    assert!(script.contains(r#"\"fc1\":{"#) && script.contains(r#"\"out\":7"#), "{script}");
+}

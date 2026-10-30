@@ -42,6 +42,8 @@ impl Server {
             .route("/api/jobs/:id/stop", post(stop_job))
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
+            .route("/api/tracking/runs", get(tracking_runs))
+            .route("/api/tracking/runs/:id", get(tracking_run))
             .route("/api/blocks", get(list_blocks))
             .route("/api/graph/validate", post(graph_validate))
             .route("/api/graph/compose", post(graph_compose))
@@ -583,11 +585,14 @@ async fn graph_run(
         .join(".sentinel")
         .join("generated");
     std::fs::create_dir_all(&dir).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    // One script per job: concurrent runs of the same component (e.g. a sweep) must not
+    // overwrite each other's generated code.
+    let mut spec = JobSpec::new(format!("graph-{id}"), RunMode::Command);
     let file_stem: String = id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-    let script = dir.join(format!("{file_stem}.py"));
+    let script = dir.join(format!("{file_stem}-{}.py", &spec.id.simple().to_string()[..8]));
     std::fs::write(&script, code).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    let mut spec = JobSpec::new(format!("graph-{id}"), RunMode::Command);
     spec.component_id = Some(id.clone());
     spec.command = Some(format!("python3 '{}'", script.display()));
     if let Ok(sdk) = std::env::var("SENTINEL_SDK_PATH") {
@@ -601,4 +606,21 @@ async fn graph_run(
         .await
         .map(Json)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))
+}
+
+// ---------------------------------------------------------------------------
+// Experiment tracking (mlruns/): run list and metric curves
+// ---------------------------------------------------------------------------
+
+fn mlruns_root() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("mlruns")
+}
+
+async fn tracking_runs() -> impl IntoResponse {
+    Json(sentinel_core::tracking::list_runs(&mlruns_root()))
+}
+
+async fn tracking_run(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let (run, metrics) = sentinel_core::tracking::read_run(&mlruns_root(), &id, 600).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(json!({ "run": run, "metrics": metrics })))
 }
