@@ -930,6 +930,7 @@ name = "sentinel-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "sentinel-core",
  "serde",
@@ -940,6 +941,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
