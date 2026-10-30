@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type MetricPoint, type TrackedRun } from '../api';
 import { usePoll } from '../hooks';
+import { Icon } from '../icons';
 import { LineChart, type Series } from '../LineChart';
+import { EmptyState } from '../ui';
 
 const COLORS = ['#60a5fa', '#f59e0b', '#4ade80', '#f472b6', '#a78bfa', '#fb7185', '#2dd4bf', '#facc15'];
 const fmtNum = (v: number | undefined) => (v === undefined ? '—' : Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(2) : (+v.toPrecision(4)).toString());
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : '—');
 const dur = (r: TrackedRun) => (r.start_time && r.end_time ? `${((r.end_time - r.start_time) / 1000).toFixed(1)}s` : '—');
 
-export function Experiments() {
+export function Experiments({ go }: { go: (t: string) => void }) {
   const runs = usePoll(api.trackedRuns, 2000);
   const [picked, setPicked] = useState<string[]>([]);
   const [data, setData] = useState<Record<string, Record<string, MetricPoint[]>>>({});
@@ -53,7 +55,8 @@ export function Experiments() {
           <thead><tr><th /><th>Run</th><th>Status</th><th>Started</th><th>Time</th>
             {metricKeys.map((k) => <th key={k}>{k}</th>)}{paramKeys.map((k) => <th key={k} style={{ color: '#888' }}>{k}</th>)}</tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={5} className="empty">No tracked runs yet. Run a component that logs with the Sentinel SDK.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={5}><EmptyState icon={<Icon name="experiments" size={20} />} title="No tracked runs yet" hint="Components log metrics with the Sentinel SDK automatically.">
+              <button className="btn primary" onClick={() => go('components')}>Train something</button></EmptyState></td></tr>}
             {list.map((r) => (
               <tr key={r.run_id} onClick={() => toggle(r.run_id)} style={{ cursor: 'pointer', background: picked.includes(r.run_id) ? '#101010' : undefined }}>
                 <td><input type="checkbox" checked={picked.includes(r.run_id)} readOnly style={{ accentColor: picked.includes(r.run_id) ? color(r.run_id) : undefined }} /></td>

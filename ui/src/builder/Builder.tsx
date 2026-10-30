@@ -4,6 +4,7 @@ import {
   type Connection, type Edge, type EdgeChange, type NodeChange,
 } from '@xyflow/react';
 import { api, type BlockInfo, type Component, type ValidateOk } from '../api';
+import { Icon } from '../icons';
 import { Modal, useToast } from '../ui';
 import { BlockNodeView, BuilderCtx, InputNodeView, OutputNodeView } from './BlockNode';
 import { IDENT, emptyGraph, fromSpec, toSpec, wouldCycle } from './convert';
@@ -11,6 +12,8 @@ import { Inspector } from './Inspector';
 import { SaveModal } from './SaveModal';
 import type { BNode, Graph } from './types';
 
+const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#a78bfa', vision: '#f472b6', graph: '#22d3ee' };
+const famColor = (f?: string) => (f && FAM_COLOR[f]) || '#555';
 const nodeTypes = { block: BlockNodeView, input: InputNodeView, output: OutputNodeView };
 const FAMILIES = ['core', 'shape', 'sequence', 'attention', 'vision', 'graph'];
 const edgeId = (e: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null }) =>
@@ -39,6 +42,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
   const [errorNode, setErrorNode] = useState<string | null>(null);
   const [code, setCode] = useState<{ title: string; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [find, setFind] = useState('');
 
   /* ---------- history ---------- */
   const past = useRef<Graph[]>([]);
@@ -83,8 +87,10 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
   }, [apply, blocks, rf, toast]);
 
   useEffect(() => {
-    if (initialComponent && Object.keys(blocks).length) { load(initialComponent); onConsumed(); }
-  }, [initialComponent, blocks, load, onConsumed]);
+    if (!initialComponent) return;
+    if (initialComponent === '__new__') { apply(() => emptyGraph()); onConsumed(); return; }
+    if (Object.keys(blocks).length) { load(initialComponent); onConsumed(); }
+  }, [initialComponent, blocks, load, onConsumed, apply]);
 
   /* ---------- live validation ---------- */
   const specKey = useMemo(() => JSON.stringify(toSpec(g)), [g]);
@@ -251,11 +257,14 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
           <option value="">Load readymade component…</option>
           {ready.map((c) => <option key={c.component_id} value={c.component_id}>{c.name} ({c.component_id})</option>)}
         </select>
+        <span className="bd-sep" aria-hidden />
         <button className="btn" onClick={() => apply(() => emptyGraph())}>New</button>
         <button className="btn" onClick={() => addIO('input')}>+ Input</button>
         <button className="btn" onClick={() => addIO('output')}>+ Output</button>
+        <span className="bd-sep" aria-hidden />
         <button className="btn" onClick={undo} disabled={!past.current.length}>Undo</button>
         <button className="btn" onClick={redo} disabled={!future.current.length}>Redo</button>
+        <span className="bd-sep" aria-hidden />
         <button className="btn" onClick={compose} disabled={!hasBlocks}>View PyTorch</button>
         <button className="btn" onClick={() => setSaving(true)} disabled={!result} title={result ? 'Save as a reusable component' : 'Fix validation errors first'}>Save as component</button>
         <button className="btn primary" onClick={run} disabled={!hasBlocks}>Run</button>
@@ -263,11 +272,12 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
       </div>
       <div className="bd-main">
         <div className="bd-side">
+          <input className="input" type="search" placeholder="Search blocks…" aria-label="Search blocks" value={find} onChange={(e) => setFind(e.target.value)} style={{ width: '100%', minWidth: 0, marginBottom: 10 }} />
           {FAMILIES.map((f) => {
-            const items = Object.values(blocks).filter((b) => b.family === f);
+            const items = Object.values(blocks).filter((b) => b.family === f && `${b.name} ${b.description}`.toLowerCase().includes(find.toLowerCase()));
             if (!items.length) return null;
             return (
-              <div key={f}>
+              <div key={f} style={{ ['--fam' as string]: `var(--fam-${f})` }}>
                 <div className="bd-fam">{f}</div>
                 {items.map((b) => (
                   <div key={b.name} className="bd-pal" draggable title="Drag onto the canvas, or double-click"
@@ -290,7 +300,15 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
           >
             <Background variant={BackgroundVariant.Dots} gap={22} color="#222" />
             <Controls showInteractive={false} />
-            <MiniMap pannable zoomable maskColor="rgba(0,0,0,.6)" nodeColor="#555" />
+            <MiniMap pannable zoomable maskColor="rgba(0,0,0,.6)" nodeColor={(n) => (n.type === 'block' ? famColor(blocks[(n.data as { block: string }).block]?.family) : '#555')} />
+            {!g.nodes.some((n) => n.type === 'block') && (
+              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', zIndex: 4 }}>
+                <div className="empty-state" style={{ maxWidth: 340 }}>
+                  <div className="ico"><Icon name="builder" size={20} /></div>
+                  <b>Start your graph</b>Drag a block from the left (or double-click it), then wire output ports to input ports.
+                </div>
+              </div>
+            )}
           </ReactFlow>
         </div>
         <div className="bd-side">

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api, type Component } from '../api';
 import { usePoll } from '../hooks';
 import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
-import { Field, Modal, useToast } from '../ui';
+import { Icon } from '../icons';
+import { EmptyState, Field, Modal, Skeleton, useToast } from '../ui';
 
 function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => void; refresh: () => void; go: (t: string) => void }) {
   const toast = useToast();
@@ -67,33 +68,51 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
   );
 }
 
+const DOMAIN_COLOR: Record<string, string> = { tabular: '#7c5cff', sequence: '#fbbf24', vision: '#f472b6', graph: '#22d3ee', llm: '#34d399', custom: '#94a3b8' };
+const colorOf = (d: string) => DOMAIN_COLOR[d] ?? '#94a3b8';
+
 export function Components({ refresh, go, openInBuilder }: { refresh: () => void; go: (t: string) => void; openInBuilder: (id: string) => void }) {
   const { data } = usePoll(api.components, 15000);
   const [sel, setSel] = useState<Component | null>(null);
+  const [q, setQ] = useState('');
+  const [domain, setDomain] = useState<string | null>(null);
   const domains = [...new Set((data ?? []).map((c) => c.domain))].sort();
+  const shown = (data ?? []).filter((c) => (!domain || c.domain === domain)
+    && `${c.name} ${c.component_id} ${c.description}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
       <div className="page-header"><div><div className="eyebrow">COMPONENT REGISTRY</div><h1 className="page-title">Components</h1>
-        <p className="page-sub">Readymade architectures with editable hyperparameters. Open any graph component in the Builder.</p></div></div>
-      {domains.map((d) => (
-        <section key={d} style={{ marginBottom: 22 }}>
-          <div className="nav-title" style={{ padding: 0, marginBottom: 8 }}>{d}</div>
-          <div className="grid cards">
-            {data!.filter((c) => c.domain === d).map((c) => (
-              <div className="card" key={c.component_id}>
-                <div className="row sp"><b>{c.name}</b>{c.graph ? <span className="tag">GRAPH</span> : null}</div>
-                <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.component_id}</div>
-                <p style={{ color: 'var(--text-secondary)', margin: '8px 0 12px' }}>{c.description}</p>
-                <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 10 }}>{Object.keys(c.parameters).length} hyperparameters</div>
-                <div className="row">
-                  <button className="btn sm primary" onClick={() => setSel(c)}>Configure</button>
-                  {c.graph ? <button className="btn sm" onClick={() => openInBuilder(c.component_id)}>Open in Builder</button> : null}
-                </div>
+        <p className="page-sub">Readymade architectures with editable hyperparameters. Open any graph component in the Builder.</p></div>
+        <button className="btn primary" onClick={() => openInBuilder('__new__')}><Icon name="plus" size={14} /> New component</button></div>
+      <div className="filterbar">
+        <input className="input" type="search" placeholder="Search components…" aria-label="Search components" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="chips" role="group" aria-label="Filter by domain">
+          <button className={'chip' + (domain === null ? ' on' : '')} onClick={() => setDomain(null)}>all</button>
+          {domains.map((d) => <button key={d} className={'chip' + (domain === d ? ' on' : '')} onClick={() => setDomain(domain === d ? null : d)}>{d}</button>)}
+        </div>
+      </div>
+      <div className="grid cards">
+        {!data && Array.from({ length: 6 }, (_, i) => <div className="card" key={i}><Skeleton h={34} w={34} /><Skeleton h={14} w="60%" style={{ margin: '12px 0 8px' }} /><Skeleton h={10} /><Skeleton h={10} w="80%" style={{ marginTop: 6 }} /></div>)}
+        {shown.map((c) => (
+          <div className="card hover" key={c.component_id} style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="row sp" style={{ alignItems: 'flex-start' }}>
+              <div className="icon-tile" style={{ background: colorOf(c.domain) + '22', color: colorOf(c.domain) }}>{c.domain.slice(0, 2).toUpperCase()}</div>
+              <div className="chips">{c.graph ? <span className="chip on">graph</span> : null}<span className="chip">{c.domain}</span></div>
+            </div>
+            <b style={{ marginTop: 12, fontSize: 14 }}>{c.name}</b>
+            <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.component_id}</div>
+            <p style={{ color: 'var(--text-secondary)', margin: '8px 0 14px', flex: 1 }}>{c.description}</p>
+            <div className="row sp">
+              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{Object.keys(c.parameters).length} hyperparameters</span>
+              <div className="row">
+                {c.graph ? <button className="btn sm" onClick={() => openInBuilder(c.component_id)}>Open in Builder</button> : null}
+                <button className="btn sm primary" onClick={() => setSel(c)}>Configure</button>
               </div>
-            ))}
+            </div>
           </div>
-        </section>
-      ))}
+        ))}
+      </div>
+      {data && shown.length === 0 && <EmptyState icon={<Icon name="search" size={20} />} title="No components match" hint="Try a different search or clear the domain filter."><button className="btn" onClick={() => { setQ(''); setDomain(null); }}>Clear filters</button></EmptyState>}
       {sel && <Configure c={sel} onClose={() => setSel(null)} refresh={refresh} go={go} />}
     </>
   );

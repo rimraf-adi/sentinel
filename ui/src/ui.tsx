@@ -1,19 +1,44 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { JobStatus } from './api';
 
 export function Modal({ title, sub, onClose, children, wide }: { title: string; sub?: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const id = useId();
+  const box = useRef<HTMLDivElement>(null);
+  // Escape closes; focus moves into the dialog and returns to the opener afterwards.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    box.current?.querySelector<HTMLElement>('input:not([type=checkbox]), select, textarea, button:not([aria-label=Close])')?.focus();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && (e.stopPropagation(), onClose());
+    window.addEventListener('keydown', key, true);
+    return () => { window.removeEventListener('keydown', key, true); opener?.focus?.(); };
+  }, [onClose]);
   return (
     <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={'modal' + (wide ? ' wide' : '')}>
+      <div ref={box} className={'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-labelledby={id}>
         <div className="row sp" style={{ marginBottom: 14 }}>
           <div>
-            <h3>{title}</h3>
+            <h3 id={id}>{title}</h3>
             {sub && <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</div>}
           </div>
-          <button className="btn sm" onClick={onClose}>✕</button>
+          <button className="btn sm" aria-label="Close" onClick={onClose}>✕</button>
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+export function Skeleton({ h = 16, w = '100%', style }: { h?: number; w?: number | string; style?: React.CSSProperties }) {
+  return <div className="skeleton" style={{ height: h, width: w, ...style }} aria-hidden />;
+}
+
+export function EmptyState({ icon, title, hint, children }: { icon: ReactNode; title: string; hint?: string; children?: ReactNode }) {
+  return (
+    <div className="empty-state">
+      <div className="ico">{icon}</div>
+      <b>{title}</b>
+      {hint && <div>{hint}</div>}
+      {children && <div style={{ marginTop: 14 }}>{children}</div>}
     </div>
   );
 }
@@ -55,7 +80,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      {t && <div className={'toast' + (t.err ? ' err' : '')}>{t.msg}</div>}
+      {t && <div className={'toast' + (t.err ? ' err' : '')} role={t.err ? 'alert' : 'status'}>{t.msg}</div>}
     </ToastCtx.Provider>
   );
 }

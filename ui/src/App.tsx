@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { CommandPalette } from './CommandPalette';
 import { usePoll, useTelemetry } from './hooks';
+import { Icon, type IconName } from './icons';
+import { Logo } from './Logo';
 import { ToastProvider } from './ui';
 import { Overview } from './pages/Overview';
 import { Runs } from './pages/Runs';
@@ -17,19 +20,21 @@ const TABS = [
   { id: 'runs', label: 'Runs', group: 'Workspace' },
   { id: 'experiments', label: 'Experiments', group: 'Workspace' },
   { id: 'sweeps', label: 'Sweeps', group: 'Workspace' },
+  { id: 'system', label: 'System', group: 'Workspace' },
   { id: 'components', label: 'Components', group: 'Project' },
   { id: 'builder', label: 'Builder', group: 'Project' },
   { id: 'datasets', label: 'Datasets', group: 'Project' },
-  { id: 'system', label: 'System', group: 'Workspace' },
   { id: 'code', label: 'Code (Read-Only)', group: 'Project' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
 const fromHash = (): Tab => (TABS.find((t) => t.id === location.hash.slice(1))?.id ?? 'overview');
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function App() {
   const [tab, setTab] = useState<Tab>(fromHash);
   const [builderComponent, setBuilderComponent] = useState<string | null>(null);
+  const [palette, setPalette] = useState(false);
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
   const datasets = usePoll(api.datasets, 5000);
@@ -40,8 +45,16 @@ export function App() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
   const go = useCallback((t: string) => { location.hash = t; }, []);
   const openInBuilder = useCallback((id: string) => { setBuilderComponent(id); go('builder'); }, [go]);
+  const closePalette = useCallback(() => setPalette(false), []);
 
   const r = repo.data;
   const running = jobs.data?.filter((j) => j.status === 'running').length ?? 0;
@@ -51,9 +64,10 @@ export function App() {
 
   return (
     <ToastProvider>
+      <a className="skip" href="#main">Skip to content</a>
       <div className="app">
         <aside className="sidebar">
-          <div className="brand"><div className="brand-mark" /><div><b>sentinel</b><small>TRAINING CONTROL</small></div></div>
+          <div className="brand"><Logo size={28} /><div><b>sentinel</b><small>TRAINING CONTROL</small></div></div>
           <div className="ws-card">
             <b>{name}</b>
             <span className="mono">{r?.workspace_path ?? '…'}</span>
@@ -62,40 +76,48 @@ export function App() {
               <span className="tag">{r ? (r.git_clean ? 'clean' : 'modified') : '…'}</span>
             </div>
           </div>
-          {groups.map((g) => (
-            <div key={g}>
-              <div className="nav-title">{g}</div>
-              {TABS.filter((t) => t.group === g).map((t) => (
-                <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} onClick={() => go(t.id)}>
-                  {t.label}
-                  {t.id === 'runs' && <span className="badge">{running}</span>}
-                  {t.id === 'datasets' && <span className="badge">{datasets.data?.length ?? 0}</span>}
-                </button>
-              ))}
-            </div>
-          ))}
+          <nav aria-label="Main">
+            {groups.map((g) => (
+              <div key={g} style={{ marginBottom: 14 }}>
+                <div className="nav-title">{g}</div>
+                {TABS.filter((t) => t.group === g).map((t) => (
+                  <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} aria-current={t.id === tab ? 'page' : undefined} onClick={() => go(t.id)}>
+                    <Icon name={t.id as IconName} />
+                    {t.label}
+                    {t.id === 'runs' && running > 0 && <span className="badge" aria-label={`${running} running`}>{running}</span>}
+                    {t.id === 'datasets' && <span className="badge">{datasets.data?.length ?? 0}</span>}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
         </aside>
         <div className="main">
           <header className="topbar">
             <div className="crumb">{name} / <b>{title}</b></div>
             <div className="pills">
+              <button className="search-btn" onClick={() => setPalette(true)} aria-label="Open command palette" aria-keyshortcuts="Control+K Meta+K">
+                <span className="row" style={{ gap: 8 }}><Icon name="search" size={14} /><span className="hint-text">Search or jump to…</span></span>
+                <span className="kbd">{isMac ? '⌘' : 'Ctrl'} K</span>
+              </button>
               {r && !r.lock_file_found && <span className="pill"><span className="dot warn" />sentinel.lock missing</span>}
-              <span className="pill"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
+              <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
             </div>
           </header>
-          <main className={'content' + (tab === 'builder' || tab === 'code' ? ' fill' : '')}>
-            {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} />}
-            {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} />}
-            {tab === 'experiments' && <Experiments />}
+          <main id="main" tabIndex={-1} className={'content' + (tab === 'builder' || tab === 'code' ? ' fill' : '')}>
+            {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} openInBuilder={openInBuilder} />}
+            {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} go={go} />}
+            {tab === 'experiments' && <Experiments go={go} />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}
+            {tab === 'system' && <System hw={hw} />}
             {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInBuilder={openInBuilder} />}
             {tab === 'builder' && <Builder initialComponent={builderComponent} onConsumed={() => setBuilderComponent(null)} refreshJobs={jobs.refresh} go={go} />}
             {tab === 'datasets' && <Datasets datasets={datasets.data ?? []} refresh={datasets.refresh} />}
-            {tab === 'system' && <System hw={hw} />}
             {tab === 'code' && <Code />}
           </main>
         </div>
       </div>
+      {palette && <CommandPalette onClose={closePalette} go={go} openInBuilder={openInBuilder} tabs={TABS.map((t) => ({ id: t.id, label: t.label }))} />}
     </ToastProvider>
   );
 }

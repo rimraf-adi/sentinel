@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type JobRecord } from '../api';
-import { Modal, StatusPill, fmtTime, useToast } from '../ui';
+import { Icon } from '../icons';
+import { EmptyState, Modal, StatusPill, fmtTime, useToast } from '../ui';
 
 function Logs({ job, onClose }: { job: JobRecord; onClose: () => void }) {
   const [lines, setLines] = useState<string[]>([]);
@@ -18,7 +19,7 @@ function Logs({ job, onClose }: { job: JobRecord; onClose: () => void }) {
   );
 }
 
-export function Runs({ jobs, refresh }: { jobs: JobRecord[]; refresh: () => void }) {
+export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => void; go: (t: string) => void }) {
   const toast = useToast();
   const [open, setOpen] = useState<string | null>(null);
   const [custom, setCustom] = useState(false);
@@ -40,7 +41,8 @@ export function Runs({ jobs, refresh }: { jobs: JobRecord[]; refresh: () => void
         <table>
           <thead><tr><th>Name</th><th>Status</th><th>Component</th><th>Started</th><th>Exit</th><th /></tr></thead>
           <tbody>
-            {jobs.length === 0 && <tr><td colSpan={6} className="empty">No runs recorded yet.</td></tr>}
+            {jobs.length === 0 && <tr><td colSpan={6}><EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a component, or run any command under supervision.">
+              <button className="btn primary" onClick={() => go('components')}>Pick a template</button></EmptyState></td></tr>}
             {jobs.map((j) => (
               <tr key={j.spec.id}>
                 <td><b>{j.spec.name}</b><div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{j.spec.id.slice(0, 8)}</div></td>
