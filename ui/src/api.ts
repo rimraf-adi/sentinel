@@ -139,6 +139,8 @@ export interface BlockParam {
   required: boolean;
   default: unknown;
   help: string;
+  /** Choice parameters: the allowed values. */
+  options: string[];
 }
 export interface BlockInfo {
   name: string;

@@ -112,9 +112,10 @@ export function Inspector(p: InspectorProps) {
           const label = bp.name + (bp.required ? ' *' : '');
           if (typeof bp.default === 'boolean')
             return <Field key={bp.name} label={label} hint={bp.help}><input type="checkbox" checked={!!v} onChange={(e) => setParam(bp.name, e.target.checked)} /></Field>;
-          if (bp.name === 'kind')
-            return <Field key={bp.name} label={label} hint={bp.help}>{sel(['relu', 'gelu', 'tanh', 'sigmoid', 'silu', 'softmax', 'leaky_relu'], String(v), (x) => setParam(bp.name, x))}</Field>;
-          return <Field key={bp.name} label={label} hint={bp.help}><Commit value={show(v)} onCommit={(s) => setParam(bp.name, parse(s))} /></Field>;
+          if (bp.options.length > 0)
+            return <Field key={bp.name} label={label} hint={bp.help}>{sel(bp.options, String(v), (x) => setParam(bp.name, x))}</Field>;
+          // an empty optional number means "use the default" (null)
+          return <Field key={bp.name} label={label} hint={bp.help}><Commit value={show(v)} onCommit={(s) => setParam(bp.name, s.trim() === '' && bp.default === null ? null : parse(s))} /></Field>;
         })}
         {sharable.length > 0 && <Field label="Share weights with">{sel(['', ...sharable], node.data.share ?? '', (x) => p.patchData(node.id, { share: x || null }))}</Field>}
         {del}

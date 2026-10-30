@@ -2,6 +2,7 @@
 //! with its ports, parameters, shape rule, and PyTorch emission.
 
 use crate::graph::{Dim, GraphError, Params, Shape};
+use serde_yaml::Value;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -128,6 +129,12 @@ const HELPER_GAT: &str = r#"class GraphAttention(nn.Module):
         return out.reshape(B, N, -1) if self.concat else out.mean(dim=2)
 "#;
 
+/// Every activation the `activation` block can build (`alpha` tunes the ones that take a parameter).
+pub const ACTIVATIONS: &[&str] = &[
+    "relu", "leaky_relu", "prelu", "elu", "selu", "gelu", "gelu_tanh", "silu", "mish", "softplus", "softsign", "tanh", "sigmoid", "hardtanh",
+    "hardswish", "hardsigmoid", "relu6", "logsigmoid", "softmax", "log_softmax", "tanhshrink", "glu", "identity",
+];
+
 /// (name, default as JSON — empty string means required, help)
 type ParamDef = (&'static str, &'static str, &'static str);
 
@@ -137,6 +144,8 @@ pub struct ParamInfo {
     pub required: bool,
     pub default: Option<serde_json::Value>,
     pub help: String,
+    /// For choice parameters: the allowed values (empty otherwise), so UIs need not hardcode them.
+    pub options: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -277,7 +286,7 @@ impl Block {
     pub fn description(&self) -> &'static str {
         match self {
             Block::Linear => "Fully connected layer on the last dimension (the ANN building block)",
-            Block::Activation => "Element-wise nonlinearity (relu, gelu, tanh, sigmoid, silu, softmax, leaky_relu)",
+            Block::Activation => "Nonlinearity: relu, leaky_relu, prelu (learnable), elu, selu, gelu, silu, mish, softplus, tanh, sigmoid, hard variants, softmax, glu (halves the width), identity and more",
             Block::Dropout => "Randomly zeroes activations during training",
             Block::LayerNorm => "Layer normalization over the last dimension",
             Block::BatchNorm => "Batch normalization over the feature/channel dimension",
@@ -328,7 +337,10 @@ impl Block {
     fn param_defs(&self) -> &'static [ParamDef] {
         match self {
             Block::Linear => &[("out", "", "Output features"), ("bias", "true", "Learn an additive bias")],
-            Block::Activation => &[("kind", "\"relu\"", "relu | gelu | tanh | sigmoid | silu | softmax | leaky_relu")],
+            Block::Activation => &[
+                ("kind", "\"relu\"", "which nonlinearity (see the options)"),
+                ("alpha", "null", "leaky_relu: negative slope (0.01), elu: alpha (1.0), softplus: beta (1.0); ignored by the others"),
+            ],
             Block::Dropout => &[("p", "0.1", "Drop probability")],
             Block::Concat => &[("axis", "-1", "Axis to concatenate along")],
             Block::Lstm | Block::Gru => &[
@@ -369,6 +381,17 @@ impl Block {
         }
     }
 
+    /// Allowed values of a choice parameter.
+    fn param_options(&self, name: &str) -> Vec<String> {
+        let list: &[&str] = match (self, name) {
+            (Block::Activation, "kind") => ACTIVATIONS,
+            (Block::Upsample, "mode") => &["nearest", "bilinear"],
+            (Block::PositionalEncoding, "kind") => &["learned", "sinusoidal"],
+            _ => &[],
+        };
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
     pub fn info(&self) -> BlockInfo {
         BlockInfo {
             name: self.name().into(),
@@ -385,6 +408,7 @@ impl Block {
                     required: d.is_empty(),
                     default: if d.is_empty() { None } else { serde_json::from_str(d).ok() },
                     help: h.to_string(),
+                    options: self.param_options(n),
                 })
                 .collect(),
             uses: vec![],
@@ -474,8 +498,14 @@ impl Block {
             Block::Attention | Block::TransformerEncoder => pos("heads")?,
             Block::Activation => {
                 let k = gets(p, "kind");
-                if !["relu", "gelu", "tanh", "sigmoid", "silu", "softmax", "leaky_relu"].contains(&k.as_str()) {
-                    return Err(bad(node, "kind", format!("unsupported activation '{k}'")));
+                let k = if k == "swish" { "silu".to_string() } else { k };
+                if !ACTIVATIONS.contains(&k.as_str()) {
+                    return Err(bad(node, "kind", format!("unsupported activation '{k}' (options: {})", ACTIVATIONS.join(", "))));
+                }
+                match p.get("alpha") {
+                    None | Some(Value::Null) => {}
+                    Some(v) if v.as_f64().is_some_and(|a| a.is_finite() && a > 0.0) => {}
+                    Some(_) => return Err(bad(node, "alpha", "must be a positive number (or null for the default)")),
                 }
             }
             Block::Dropout => {
@@ -526,6 +556,16 @@ impl Block {
                         ));
                     }
                 }
+                Ok(one("out", o))
+            }
+            Block::Activation if gets(p, "kind") == "glu" => {
+                let x = x.unwrap();
+                let n = last_const(node, "in", x)?;
+                if n % 2 != 0 {
+                    return Err(shape_err(node, "in", format!("glu halves the last dimension, which must be even (found {n})")));
+                }
+                let mut o = x.clone();
+                *o.last_mut().unwrap() = Dim::Const(n / 2);
                 Ok(one("out", o))
             }
             Block::Activation | Block::Dropout => Ok(one("out", x.unwrap().clone())),
@@ -845,6 +885,7 @@ impl Block {
                 let (hd, od) = (geti(p, "heads") as u64, geti(p, "out") as u64);
                 i * hd * od + 2 * hd * od
             }
+            Block::Activation if gets(p, "kind") == "prelu" => 1,
             Block::Activation | Block::Dropout | Block::Add | Block::Concat | Block::MaxPool2d | Block::AvgPool2d | Block::GlobalAvgPool | Block::Flatten
             | Block::Reshape | Block::Upsample | Block::MeanPool | Block::LastStep | Block::ClsSelect | Block::Sampling => 0,
         }
@@ -953,15 +994,34 @@ impl Block {
                 if getb(p, "bias") { "True" } else { "False" }
             ),
             Block::Gcn => format!("nn.Linear({}, {})", last(x?), geti(p, "out")),
-            Block::Activation => match gets(p, "kind").as_str() {
-                "relu" => "nn.ReLU()".into(),
-                "gelu" => "nn.GELU()".into(),
-                "tanh" => "nn.Tanh()".into(),
-                "sigmoid" => "nn.Sigmoid()".into(),
-                "silu" => "nn.SiLU()".into(),
-                "softmax" => "nn.Softmax(dim=-1)".into(),
-                _ => "nn.LeakyReLU()".into(),
-            },
+            Block::Activation => {
+                let alpha = p.get("alpha").and_then(|v| v.as_f64());
+                match gets(p, "kind").as_str() {
+                    "relu" => "nn.ReLU()".into(),
+                    "leaky_relu" => format!("nn.LeakyReLU({})", alpha.unwrap_or(0.01)),
+                    "prelu" => "nn.PReLU()".into(),
+                    "elu" => format!("nn.ELU({})", alpha.unwrap_or(1.0)),
+                    "selu" => "nn.SELU()".into(),
+                    "gelu" => "nn.GELU()".into(),
+                    "gelu_tanh" => "nn.GELU(approximate='tanh')".into(),
+                    "silu" | "swish" => "nn.SiLU()".into(),
+                    "mish" => "nn.Mish()".into(),
+                    "softplus" => format!("nn.Softplus(beta={})", alpha.unwrap_or(1.0)),
+                    "softsign" => "nn.Softsign()".into(),
+                    "tanh" => "nn.Tanh()".into(),
+                    "sigmoid" => "nn.Sigmoid()".into(),
+                    "hardtanh" => "nn.Hardtanh()".into(),
+                    "hardswish" => "nn.Hardswish()".into(),
+                    "hardsigmoid" => "nn.Hardsigmoid()".into(),
+                    "relu6" => "nn.ReLU6()".into(),
+                    "logsigmoid" => "nn.LogSigmoid()".into(),
+                    "softmax" => "nn.Softmax(dim=-1)".into(),
+                    "log_softmax" => "nn.LogSoftmax(dim=-1)".into(),
+                    "tanhshrink" => "nn.Tanhshrink()".into(),
+                    "glu" => "nn.GLU(dim=-1)".into(),
+                    _ => "nn.Identity()".into(),
+                }
+            }
             Block::Dropout => format!("nn.Dropout({})", getf(p, "p")),
             Block::LayerNorm => format!("nn.LayerNorm({})", last(x?)),
             Block::BatchNorm => {

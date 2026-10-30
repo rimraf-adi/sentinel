@@ -257,7 +257,7 @@ impl BlockKind {
                 params: c
                     .params
                     .iter()
-                    .map(|(n, p)| ParamInfo { name: n.clone(), required: p.default.is_none(), default: p.default.as_ref().and_then(|v| serde_json::to_value(v).ok()), help: p.help.clone() })
+                    .map(|(n, p)| ParamInfo { name: n.clone(), required: p.default.is_none(), default: p.default.as_ref().and_then(|v| serde_json::to_value(v).ok()), help: p.help.clone(), options: vec![] })
                     .collect(),
                 uses: c.uses(),
                 definition: serde_json::to_value(&c.graph).ok(),
