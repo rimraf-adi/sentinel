@@ -1,0 +1,12 @@
+[package]
+name = "sentinel-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sentinel-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

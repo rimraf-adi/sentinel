@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sentinel-core",
+    "crates/sentinel-daemon",
+    "crates/sentinel-agent",
+    "crates/sentinel-cli",
+    "crates/sentinel-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Aditya Kinjawadekar <kinjawadekaradi112@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rimraf-adi/sentinel"
+
+[workspace.dependencies]
+# Internal crates
+sentinel-core = { path = "crates/sentinel-core" }
+sentinel-daemon = { path = "crates/sentinel-daemon" }
+sentinel-agent = { path = "crates/sentinel-agent" }
+sentinel-ui = { path = "crates/sentinel-ui" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Async & Networking
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+tokio-tungstenite = "0.24"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+
+# CLI & Utilities
+clap = { version = "4.5", features = ["derive", "env"] }
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.10", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+sysinfo = "0.31"
