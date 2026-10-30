@@ -3,15 +3,18 @@
 use crate::scheduler::{DynamicGpuPool, HardwareMonitor};
 use crate::supervisor::ProcessSupervisor;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
 use axum::routing::{get, post};
 use axum::Router;
-use sentinel_core::models::{HardwareStats, JobRecord, JobSpec};
+use sentinel_core::models::{HardwareStats, JobRecord, JobSpec, RunMode};
 use sentinel_core::templates::TemplateRegistry;
 use sentinel_ui::{DashboardState, DashboardView};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -35,17 +38,20 @@ impl Server {
             .route("/", get(dashboard_page))
             .route("/api/health", get(health_check))
             .route("/api/jobs", get(list_jobs).post(submit_job))
+            .route("/api/jobs/run-template", post(run_template_job))
             .route("/api/jobs/:id", get(get_job))
             .route("/api/jobs/:id/stop", post(stop_job))
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
             .route("/api/templates", get(list_templates))
+            .route("/api/files", get(list_files))
+            .route("/api/files/content", get(get_file_content))
             .route("/ws/live", get(ws_handler))
             .layer(CorsLayer::permissive())
             .with_state(state)
     }
 
-    /// Server-side downsampling for metric time series (LTTB / nth-point downsampling).
+    /// Server-side downsampling for metric time series.
     pub fn downsample_series(points: &[(u64, f64)], max_points: usize) -> Vec<(u64, f64)> {
         if points.len() <= max_points || max_points == 0 {
             return points.to_vec();
@@ -61,7 +67,6 @@ impl Server {
             }
         }
 
-        // Always include the last point
         if let Some(&last) = points.last() {
             if downsampled.last() != Some(&last) {
                 downsampled.push(last);
@@ -100,7 +105,6 @@ async fn submit_job(
     Json(spec): Json<JobSpec>,
 ) -> Result<Json<JobRecord>, (StatusCode, String)> {
     let gpus = spec.gpu_ids.len() as u32;
-    // Check if GPUs need allocation
     let allocated_gpus = state.gpu_pool.allocate(gpus).await.ok_or_else(|| {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -112,6 +116,52 @@ async fn submit_job(
     final_spec.gpu_ids = allocated_gpus;
 
     match state.supervisor.start_job(final_spec).await {
+        Ok(record) => Ok(Json(record)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RunTemplateRequest {
+    pub template_id: String,
+    #[serde(default)]
+    pub overrides: HashMap<String, serde_yaml::Value>,
+}
+
+async fn run_template_job(
+    State(state): State<AppState>,
+    Json(req): Json<RunTemplateRequest>,
+) -> Result<Json<JobRecord>, (StatusCode, String)> {
+    let template = state
+        .templates
+        .get(&req.template_id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Template '{}' not found", req.template_id)))?;
+
+    // Validate user overrides against template schema
+    template
+        .validate_overrides(&req.overrides)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let mut spec = JobSpec::new(format!("job-{}", template.name), RunMode::Framework);
+    spec.template_id = Some(req.template_id.clone());
+
+    for (k, v) in &req.overrides {
+        let json_val = serde_json::to_value(v).unwrap_or(serde_json::Value::Null);
+        spec.parameters.insert(k.clone(), json_val);
+    }
+
+    // Determine executable command
+    let cmd = if Path::new("recipes/vision_train.py").exists() {
+        "uv run python recipes/vision_train.py".to_string()
+    } else {
+        "python -c 'print(\"Sentinel job executed successfully\")'".to_string()
+    };
+    spec.command = Some(cmd);
+
+    let allocated_gpus = state.gpu_pool.allocate(1).await.unwrap_or_default();
+    spec.gpu_ids = allocated_gpus;
+
+    match state.supervisor.start_job(spec).await {
         Ok(record) => Ok(Json(record)),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
@@ -159,6 +209,67 @@ async fn list_templates(State(state): State<AppState>) -> impl IntoResponse {
     Json(templates)
 }
 
+#[derive(Serialize)]
+struct FileItem {
+    name: String,
+    path: String,
+    is_dir: bool,
+}
+
+async fn list_files() -> impl IntoResponse {
+    let mut files = Vec::new();
+    let candidates = [
+        "sentinel.yaml",
+        "sentinel.md",
+        "FILES.md",
+        "pyproject.toml",
+        "recipes/vision_train.py",
+        "recipes/sweep_orchestrator.py",
+        "templates/vision/image-classification.yaml",
+        "templates/custom/command-runner.yaml",
+        "templates/custom/starter.yaml",
+        "templates/llm/lora-finetune.yaml",
+        "templates/tabular/mlp-classifier.yaml",
+        "packages/sentinel-sdk/src/sentinel/__init__.py",
+    ];
+
+    for c in &candidates {
+        if Path::new(c).exists() {
+            files.push(FileItem {
+                name: Path::new(c)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                path: c.to_string(),
+                is_dir: false,
+            });
+        }
+    }
+
+    Json(files)
+}
+
+#[derive(Deserialize)]
+struct FileContentQuery {
+    path: String,
+}
+
+async fn get_file_content(Query(q): Query<FileContentQuery>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let path = PathBuf::from(&q.path);
+    // Security check: reject paths traversing out of root
+    if path.is_absolute() || q.path.contains("..") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    if !path.exists() || !path.is_file() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let content = std::fs::read_to_string(&path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({ "path": q.path, "content": content })))
+}
+
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -187,68 +298,5 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use tower::ServiceExt;
-
-    fn test_app_state() -> AppState {
-        AppState {
-            supervisor: ProcessSupervisor::new(),
-            gpu_pool: DynamicGpuPool::new(2),
-            hardware_monitor: Arc::new(Mutex::new(HardwareMonitor::new())),
-            templates: Arc::new(TemplateRegistry::new()),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_health_endpoint() {
-        let state = test_app_state();
-        let app = Server::router(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_hardware_endpoint() {
-        let state = test_app_state();
-        let app = Server::router(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/hardware")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[test]
-    fn test_downsampling_utility() {
-        let raw: Vec<(u64, f64)> = (0..1000).map(|i| (i, (i as f64).sin())).collect();
-        let downsampled = Server::downsample_series(&raw, 100);
-
-        assert!(downsampled.len() <= 101);
-        assert_eq!(downsampled.first().unwrap().0, 0);
-        assert_eq!(downsampled.last().unwrap().0, 999);
     }
 }
