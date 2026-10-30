@@ -49,14 +49,26 @@ model.train(False)
 with torch.no_grad():
     out = model(x)
 task = meta["task"]
+classes = meta.get("classes")
 if task == "classification":
     probs = torch.softmax(out, dim=1)
-    classes = meta["classes"]
     preds = [{"label": classes[int(p.argmax())], "index": int(p.argmax()), "probabilities": {c: float(v) for c, v in zip(classes, p)}} for p in probs]
+    res = {"task": task, "predictions": preds}
+elif task == "binary":
+    pos = torch.sigmoid(out.reshape(-1))
+    preds = [{"label": classes[int(p > 0.5)], "index": int(p > 0.5), "probabilities": {classes[0]: 1 - float(p), classes[1]: float(p)}} for p in pos]
+    res = {"task": task, "predictions": preds}
+elif task == "multilabel":
+    probs = torch.sigmoid(out)
+    preds = []
+    for p in probs:
+        on = [c for c, v in zip(classes, p) if v > 0.5]
+        preds.append({"label": "+".join(on) if on else "(none)", "index": -1, "probabilities": {c: float(v) for c, v in zip(classes, p)}, "positive": on})
     res = {"task": task, "predictions": preds}
 elif task == "vae":
     res = {"task": task, "reconstruction": out["recon"].tolist(), "latent_mean": out["mu"].tolist()}
 else:
+    # regression, ranking (one score per row), reconstruction, custom: the raw output rows
     res = {"task": task, "values": out.reshape(x.shape[0], -1).tolist()}
 print(json.dumps(res))
 "#;

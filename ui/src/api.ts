@@ -126,12 +126,12 @@ export interface CsvColumn { name: string; kind: 'numeric' | 'integer' | 'catego
 export interface Suggestion { target: string; features: string[]; task: 'classification' | 'regression'; loss: string; outputs: number }
 export interface CsvSchema { rows: number; columns: CsvColumn[]; suggestion: Suggestion | null }
 export interface ModelMeta {
-  graph: string; task: 'classification' | 'regression' | 'vae' | 'gan'; features: string[]; target: string | null; classes: string[] | null;
+  graph: string; task: 'classification' | 'binary' | 'multilabel' | 'regression' | 'ranking' | 'reconstruction' | 'vae' | 'custom' | 'gan'; features: string[]; target: string | null; classes: string[] | null;
   input_shape: number[]; loss: string; files: Record<string, string>; [k: string]: unknown;
 }
 export type PredictResult =
-  | { task: 'classification'; predictions: { label: string; index: number; probabilities: Record<string, number> }[] }
-  | { task: 'regression'; values: number[][] }
+  | { task: 'classification' | 'binary' | 'multilabel'; predictions: { label: string; index: number; probabilities: Record<string, number> }[] }
+  | { task: 'regression' | 'ranking' | 'reconstruction' | 'custom'; values: number[][] }
   | { task: 'vae'; reconstruction: number[][]; latent_mean: number[][] };
 export interface GenerateResult { task: 'gan'; features: string[]; samples: number[][] }
 export interface BlockParam {

@@ -1069,6 +1069,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "libc",
  "sentinel-agent",
  "sentinel-core",
  "sentinel-daemon",

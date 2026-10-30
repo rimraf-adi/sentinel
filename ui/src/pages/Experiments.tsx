@@ -88,7 +88,7 @@ function ModelPanel({ run }: { run: TrackedRun }) {
               ))}
             </div>
             <button className="btn primary sm" onClick={go} disabled={busy || vals.some((v) => v === '' || Number.isNaN(Number(v)))}>{busy ? 'Running…' : 'Predict'}</button>
-            {res?.task === 'classification' && (
+            {(res?.task === 'classification' || res?.task === 'binary' || res?.task === 'multilabel') && (
               <div style={{ marginTop: 12 }}>
                 <div style={{ fontSize: 16, fontWeight: 600 }}>{res.predictions[0].label}</div>
                 {Object.entries(res.predictions[0].probabilities).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c, p]) => (
@@ -97,7 +97,7 @@ function ModelPanel({ run }: { run: TrackedRun }) {
                 ))}
               </div>
             )}
-            {res?.task === 'regression' && <div className="stat-value" style={{ marginTop: 10 }}>{res.values[0].map((v) => +v.toPrecision(5)).join(', ')}</div>}
+            {(res?.task === 'regression' || res?.task === 'ranking' || res?.task === 'reconstruction' || res?.task === 'custom') && <div className="stat-value" style={{ marginTop: 10 }}>{res.values[0].map((v) => +v.toPrecision(5)).join(', ')}</div>}
             {res?.task === 'vae' && <div className="mono" style={{ fontSize: 12, marginTop: 10 }}>reconstruction {JSON.stringify(res.reconstruction[0].map((v) => +v.toPrecision(4)))}<br />latent mean {JSON.stringify(res.latent_mean[0].map((v) => +v.toPrecision(4)))}</div>}
           </div>
           )}

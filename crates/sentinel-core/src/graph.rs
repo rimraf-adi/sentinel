@@ -80,9 +80,15 @@ pub struct DataSpec {
     /// A YAML list, or one comma-separated string (so it can be a single `${param}`).
     #[serde(deserialize_with = "list_or_csv")]
     pub features: Vec<String>,
-    /// Target column. Unsupervised losses (`vae`) need none.
+    /// Target column. Unsupervised tasks (`vae`, `reconstruction`) need none.
     #[serde(default)]
     pub target: String,
+    /// Several target columns: multilabel classification and multi-output regression.
+    #[serde(default, deserialize_with = "list_or_csv_opt")]
+    pub targets: Vec<String>,
+    /// Query/group id column for the `ranking` task: rows sharing a value are ranked against each other.
+    #[serde(default)]
+    pub group: Option<String>,
     /// Per-sample shape the feature vector is reshaped to (e.g. [2, 1] for a sequence).
     #[serde(default)]
     pub reshape: Option<Vec<i64>>,
@@ -105,34 +111,195 @@ fn list_or_csv<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D:
     })
 }
 
+fn list_or_csv_opt<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    list_or_csv(d)
+}
+
 fn default_split() -> f64 {
     0.2
 }
 
+/// A choice with optional settings: `adam`, or `{name: sgd, momentum: 0.9, nesterov: true}`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Named {
+    pub name: String,
+    pub params: BTreeMap<String, Value>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum NamedRepr {
+    Plain(String),
+    Full(BTreeMap<String, Value>),
+}
+
+impl TryFrom<NamedRepr> for Named {
+    type Error = String;
+    fn try_from(r: NamedRepr) -> Result<Self, String> {
+        match r {
+            NamedRepr::Plain(name) => Ok(Named { name, params: BTreeMap::new() }),
+            NamedRepr::Full(mut m) => match m.remove("name") {
+                Some(Value::String(name)) => Ok(Named { name, params: m }),
+                _ => Err("expected a name, or a mapping with a `name` key".into()),
+            },
+        }
+    }
+}
+
+impl From<Named> for NamedRepr {
+    fn from(n: Named) -> Self {
+        if n.params.is_empty() {
+            NamedRepr::Plain(n.name)
+        } else {
+            let mut m = n.params;
+            m.insert("name".into(), Value::String(n.name));
+            NamedRepr::Full(m)
+        }
+    }
+}
+
+impl Serialize for Named {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        NamedRepr::from(self.clone()).serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Named {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Named::try_from(NamedRepr::deserialize(d)?).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Named {
+    pub fn plain(name: &str) -> Named {
+        Named { name: name.into(), params: BTreeMap::new() }
+    }
+    pub fn f64(&self, k: &str) -> Option<f64> {
+        self.params.get(k).and_then(|v| v.as_f64())
+    }
+    pub fn i64(&self, k: &str) -> Option<i64> {
+        self.params.get(k).and_then(|v| v.as_i64())
+    }
+    pub fn bool(&self, k: &str) -> Option<bool> {
+        self.params.get(k).and_then(|v| v.as_bool())
+    }
+    pub fn str(&self, k: &str) -> Option<&str> {
+        self.params.get(k).and_then(|v| v.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EarlyStopping {
+    /// Epochs without improvement before stopping.
+    pub patience: u32,
+    #[serde(default)]
+    pub min_delta: f64,
+    /// Metric to watch; defaults to the task's primary metric.
+    #[serde(default)]
+    pub monitor: Option<String>,
+}
+
+/// A task or loss the catalog does not know: a Python function supplied by the project.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct CustomSpec {
+    /// Python file inside the project (relative, no `..`) defining the functions below; inlined into the script.
+    #[serde(default)]
+    pub file: Option<String>,
+    /// Or the code itself, written in the YAML.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// `def <loss>(output, target) -> scalar tensor`
+    #[serde(default = "default_custom_loss")]
+    pub loss: String,
+    /// Optional `def <metric>(output, target) -> float`, reported as `test_<metric>`.
+    #[serde(default)]
+    pub metric: Option<String>,
+    /// `min` or `max`: which direction of the metric is better (for early stopping and best checkpoints).
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    /// `float` (regression-like targets) or `long` (class labels, mapped to indices).
+    #[serde(default = "default_dtype")]
+    pub target_dtype: String,
+}
+
+fn default_custom_loss() -> String {
+    "loss".into()
+}
+fn default_mode() -> String {
+    "min".into()
+}
+fn default_dtype() -> String {
+    "float".into()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TrainingSpec {
-    /// cross_entropy | mse | bce_logits
-    pub loss: String,
+    /// A loss name, or `{name, ...settings}`. See `training::catalog()`.
+    pub loss: Named,
+    /// classification | binary | multilabel | regression | ranking | reconstruction | vae | custom.
+    /// Inferred from the loss when omitted.
+    #[serde(default)]
+    pub task: Option<String>,
     #[serde(default = "default_optimizer")]
-    pub optimizer: String,
+    pub optimizer: Named,
     #[serde(default = "default_lr")]
     pub lr: f64,
+    #[serde(default)]
+    pub weight_decay: f64,
     #[serde(default = "default_epochs")]
     pub epochs: u32,
+    /// Rows per batch (queries per batch for ranking). Default: the whole training set.
     #[serde(default)]
     pub batch_size: Option<usize>,
     /// Weight of the KL term for the `vae` loss.
     #[serde(default = "default_beta")]
     pub beta: f64,
+    #[serde(default)]
+    pub scheduler: Option<Named>,
+    /// Gradient-norm clipping threshold.
+    #[serde(default)]
+    pub clip_grad: Option<f64>,
+    /// Batches whose gradients are summed before one optimizer step.
+    #[serde(default = "default_accumulate")]
+    pub accumulate: u32,
+    /// off | auto | bf16 | fp16
+    #[serde(default = "default_amp")]
+    pub amp: String,
+    /// auto | cpu | cuda | mps
+    #[serde(default = "default_device")]
+    pub device: String,
+    #[serde(default)]
+    pub early_stopping: Option<EarlyStopping>,
+    /// Restore the weights from the best epoch (by the monitored metric) when training ends.
+    #[serde(default)]
+    pub save_best: bool,
+    /// Top-level nodes whose weights are frozen (transfer learning).
+    #[serde(default)]
+    pub freeze: Vec<String>,
+    /// Path to a `state_dict` (e.g. an earlier run's `model.pt`) to start from.
+    #[serde(default)]
+    pub init_from: Option<String>,
+    #[serde(default)]
+    pub custom: Option<CustomSpec>,
     pub data: DataSpec,
+}
+
+fn default_accumulate() -> u32 {
+    1
+}
+fn default_amp() -> String {
+    "off".into()
+}
+fn default_device() -> String {
+    "auto".into()
 }
 
 fn default_beta() -> f64 {
     1.0
 }
 
-fn default_optimizer() -> String {
-    "adam".into()
+fn default_optimizer() -> Named {
+    Named::plain("adam")
 }
 fn default_lr() -> f64 {
     1e-3

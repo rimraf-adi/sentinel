@@ -16,6 +16,7 @@ pub mod predict;
 pub mod scaffold;
 pub mod sdk;
 pub mod storage;
+pub mod training;
 pub mod vitals;
 pub mod components;
 pub mod tracking;
