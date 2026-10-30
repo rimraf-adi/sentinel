@@ -92,6 +92,7 @@ uxML/
 ├── pyproject.toml                      # Root uv workspace configuration (`package = false`)
 ├── uv.lock                             # Pinned Python dependencies lockfile (torch, mlflow, optuna)
 ├── sentinel.md                         # Formal technical specification and architectural blueprint
+├── README.md                           # Master project documentation, quickstart, and CLI guide
 ├── FILES.md                            # Directory tree and file-by-file agentic handoff summary (this file)
 └── .gitignore                          # Ignores build artifacts (target/, .venv/, dist/, mlruns/)
 ```
@@ -105,6 +106,7 @@ uxML/
 * **`pyproject.toml`**: Root Python project configuration declaring `package = false` so `uv` treats the repo as a workspace for recipes, tests, and tools.
 * **`uv.lock`**: Pinned lockfile for Python packages (PyTorch, torchvision, MLflow, Optuna, PyYAML).
 * **`sentinel.md`**: Master architecture document containing the locked specification, philosophy, and roadmaps.
+* **`README.md`**: Master user-facing documentation, quickstart, feature overview, CLI reference, and architecture guide.
 * **`FILES.md`**: This file.
 * **`.github/workflows/release.yml`**: GitHub Actions matrix workflow building cross-platform wheels via `maturin-action` for:
   1. `x86_64-unknown-linux-gnu` (Linux x86_64)
