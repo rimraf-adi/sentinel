@@ -149,6 +149,9 @@ impl Server {
             .route("/api/datasets/:name/schema", get(schema_for_dataset))
             .route("/api/tracking/runs", get(tracking_runs))
             .route("/api/tracking/runs/:id", get(tracking_run))
+            .route("/api/tracking/runs/:id/artifacts", get(run_artifacts))
+            .route("/api/tracking/runs/:id/artifacts/:name", get(download_artifact))
+            .route("/api/predict", post(predict_run))
             .route("/api/blocks", get(list_blocks))
             .route("/api/graph/validate", post(graph_validate))
             .route("/api/graph/compose", post(graph_compose))
@@ -868,4 +871,45 @@ async fn save_block(Json(req): Json<SaveBlockRequest>) -> Result<Json<serde_json
     std::fs::write(&path, yaml).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let _ = BlockLibrary::reload_project(&root.join("blocks"));
     Ok(Json(json!({ "ok": true, "name": name, "path": rel.display().to_string() })))
+}
+
+// ---------------------------------------------------------------------------
+// Export and inference: a run's artifacts and predictions from its TorchScript model
+// ---------------------------------------------------------------------------
+
+async fn run_artifacts(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &id).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(json!({ "files": sentinel_core::predict::list_artifacts(&dir), "meta": sentinel_core::predict::read_meta(&dir) })))
+}
+
+/// Only files that appear in the run's own artifact listing can be downloaded, so a name can never escape the directory.
+async fn download_artifact(AxumPath((id, name)): AxumPath<(String, String)>) -> Result<impl IntoResponse, StatusCode> {
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &id).ok_or(StatusCode::NOT_FOUND)?;
+    if !sentinel_core::predict::list_artifacts(&dir).iter().any(|f| f.name == name) {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let bytes = std::fs::read(dir.join("artifacts").join(&name)).map_err(|_| StatusCode::NOT_FOUND)?;
+    let ctype = if name.ends_with(".json") { "application/json" } else if name.ends_with(".py") { "text/x-python" } else { "application/octet-stream" };
+    Ok((
+        [
+            (axum::http::header::CONTENT_TYPE, ctype.to_string()),
+            (axum::http::header::CONTENT_DISPOSITION, format!("attachment; filename=\"{id}-{name}\"")),
+        ],
+        bytes,
+    ))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PredictRequest {
+    pub run_id: String,
+    pub inputs: Vec<Vec<f64>>,
+}
+
+async fn predict_run(Json(req): Json<PredictRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &req.run_id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
+    // Prediction starts a Python process and can take seconds: keep it off the async threads.
+    let result = tokio::task::spawn_blocking(move || sentinel_core::predict::predict(&dir, &req.inputs))
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
 }

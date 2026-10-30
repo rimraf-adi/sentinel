@@ -101,6 +101,22 @@ Shipped compound blocks: `mlp_block`, `residual_mlp_block`, `conv_block`, `resne
 `vae_encoder`, `vae_decoder`. Shipped models built from them include `vision/vit-tiny`, `vision/unet`, `vision/resnet-mini`,
 `generative/vae` (trained with reconstruction + beta * KL) and `tabular/deep-residual-mlp`.
 
+## Export and predict
+
+Every graph-component run saves, next to its metrics (`mlruns/<exp>/<run>/artifacts/`): `model.pt` (weights), `model_script.pt`
+(TorchScript, loads with `torch.jit.load` and needs no Sentinel code), `model.onnx` (best effort), `meta.json` (task, feature
+names, classes, input shape, test metric) and `train.py` (the exact script that produced it).
+
+```bash
+sentinel model list                                   # runs that exported a model
+sentinel model predict b5a43acb -i "5.0,3.4,1.5,0.2"  # -> setosa (100.0%); repeat -i for several rows, --json for machines
+sentinel model export  b5a43acb -f onnx -o flowers.onnx   # torchscript | onnx | weights | meta | script
+```
+
+The same is available in the dashboard (Experiments, select a run: download chips and a "Try it" form) and over HTTP
+(`GET /api/tracking/runs/:id/artifacts`, `POST /api/predict {run_id, inputs}`). Run ids accept any unambiguous prefix.
+Predictions run in a short-lived Python process, so the daemon itself never loads PyTorch; batch size is free.
+
 ## Footprint
 
 Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with

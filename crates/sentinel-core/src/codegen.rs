@@ -229,6 +229,9 @@ print("classes:", CLASSES, flush=True)"#,
         None => String::new(),
     };
     let feats = feats_literal(&t.data.features);
+    let task = if vae { "vae" } else if classification { "classification" } else { "regression" };
+    let target_json = if t.data.target.is_empty() { "None".to_string() } else { format!("{:?}", t.data.target) };
+    let classes_expr = if classification { "list(CLASSES)" } else { "None" };
     let bs = t.batch_size.map(|b| b.to_string()).unwrap_or_else(|| "len(xtr)".into());
     let model_code = generate_model(g);
     // Record the model's resolved hyperparameters so runs can be compared by them.
@@ -301,12 +304,49 @@ for epoch in range({epochs}):
         print(f"epoch {{epoch:3d}} loss {{loss.item():.4f}} {metric_name} {{metric:.4f}}", flush=True)
         if sentinel:
             sentinel.log({log_dict}, step=epoch)
+
+# ---- export: weights, TorchScript, ONNX and metadata, next to the run's other artifacts ----------------------
+import os
+import pathlib
+import shutil
+
+_run = sentinel.get_run() if sentinel else None
+_art = pathlib.Path(_run.artifacts_dir) if _run is not None else pathlib.Path(os.environ.get("SENTINEL_ARTIFACT_DIR", "artifacts"))
+_art.mkdir(parents=True, exist_ok=True)
+model.train(False)
+_example = xtr[:1]
+torch.save(model.state_dict(), _art / "model.pt")
+_files = {{"weights": "model.pt"}}
+try:
+    torch.jit.trace(model, _example, strict=False, check_trace=False).save(str(_art / "model_script.pt"))
+    _files["torchscript"] = "model_script.pt"
+except Exception as _e:
+    print("torchscript export skipped:", _e, flush=True)
+try:
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the legacy exporter announces its own deprecation on every call
+        torch.onnx.export(model, _example, str(_art / "model.onnx"), input_names=["input"], dynamic_axes={{"input": {{0: "batch"}}}}, dynamo=False)
+    _files["onnx"] = "model.onnx"
+except Exception as _e:
+    print("onnx export skipped:", _e, flush=True)
+with open(_art / "meta.json", "w") as _f:
+    json.dump({{
+        "graph": {graph_id:?}, "task": "{task}", "features": [{feats}], "target": {target_json},
+        "classes": {classes_expr}, "input_shape": list(_example.shape[1:]), "loss": "{loss_name}",
+        "test_{metric_name_plain}": metric, "torch": torch.__version__, "files": _files,
+    }}, _f, indent=2)
+shutil.copyfile(__file__, _art / "train.py")
+print("artifacts saved to", _art, flush=True)
 if sentinel:
     sentinel.finish()
 "#,
         seed = t.data.seed,
         csv = t.data.csv,
         beta = t.beta,
+        loss_name = t.loss,
+        metric_name_plain = metric_name.trim_start_matches("test_"),
         split = t.data.test_split,
         lr = t.lr,
         epochs = t.epochs,

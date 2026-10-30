@@ -93,6 +93,13 @@ if python3 -c "import torch" 2>/dev/null; then
   python3 -c "import sys; sys.exit(0 if float('$ACC') > 0.6 else 1)" || { echo "❌ ANN did not learn (test_acc=$ACC)"; exit 1; }
   test -n "$(ls mlruns/0 2>/dev/null)" || { echo "❌ run was not tracked in mlruns/"; exit 1; }
   echo "✅ Graph component trained and tracked (test_acc=$ACC)."
+
+  RUN=$("$SENTINEL_BIN" model list | awk 'NR==2{print $1}')
+  test -n "$RUN" || { echo "❌ no exported model listed after training"; exit 1; }
+  "$SENTINEL_BIN" model predict "$RUN" -i "0.1,0.2" | grep -q "\->" || { echo "❌ model predict printed no result"; exit 1; }
+  "$SENTINEL_BIN" model export "$RUN" -f torchscript -o exported.pt >/dev/null && test -s exported.pt || { echo "❌ TorchScript export is empty"; exit 1; }
+  if "$SENTINEL_BIN" model predict "$RUN" -i "1,2,3" >/dev/null 2>&1; then echo "❌ wrong feature count was accepted"; exit 1; fi
+  echo "✅ Model exported (TorchScript) and predictions work from the CLI."
 else
   echo "⚠️  torch not available for python3; skipping the training steps"
 fi
@@ -126,7 +133,10 @@ if python3 -c "import torch" 2>/dev/null; then
   DAEMON=$!
   for i in $(seq 1 40); do curl -sf "localhost:$PORT/api/health" >/dev/null && break; sleep 0.25; done
   curl -s "localhost:$PORT/api/jobs/$JOB" | grep -q '"status":"completed"' || { echo "❌ job history lost after restart"; exit 1; }
-  echo "✅ Daemon served the UI, ran a job, and kept its history across a restart."
+  RID=$(curl -s "localhost:$PORT/api/tracking/runs" | python3 -c 'import sys,json;r=json.load(sys.stdin);print(next(x["run_id"] for x in r if x["status"]=="finished"))')
+  curl -s -X POST "localhost:$PORT/api/predict" -H 'content-type: application/json' -d "{\"run_id\":\"$RID\",\"inputs\":[[0.1,0.2]]}" | grep -q '"predictions"' || { echo "❌ /api/predict failed"; exit 1; }
+  test "$(curl -s -o /dev/null -w '%{http_code}' "localhost:$PORT/api/tracking/runs/$RID/artifacts/..%2Fmeta.yaml")" = "404" || { echo "❌ artifact path traversal not rejected"; exit 1; }
+  echo "✅ Daemon served the UI, ran a job, predicted from its model, and kept its history across a restart."
 fi
 kill $DAEMON 2>/dev/null || true
 

@@ -1,14 +1,74 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type MetricPoint, type TrackedRun } from '../api';
+import { api, type ModelMeta, type PredictResult, type MetricPoint, type TrackedRun } from '../api';
 import { usePoll } from '../hooks';
 import { Icon } from '../icons';
 import { LineChart, type Series } from '../LineChart';
-import { EmptyState } from '../ui';
+import { EmptyState, useToast } from '../ui';
 
 const COLORS = ['#60a5fa', '#f59e0b', '#4ade80', '#f472b6', '#a78bfa', '#fb7185', '#2dd4bf', '#facc15'];
 const fmtNum = (v: number | undefined) => (v === undefined ? '—' : Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(2) : (+v.toPrecision(4)).toString());
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : '—');
 const dur = (r: TrackedRun) => (r.start_time && r.end_time ? `${((r.end_time - r.start_time) / 1000).toFixed(1)}s` : '—');
+
+const bytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/** Download a run's exports and try its model on new data. */
+function ModelPanel({ run }: { run: TrackedRun }) {
+  const toast = useToast();
+  const [info, setInfo] = useState<{ files: { name: string; bytes: number }[]; meta: ModelMeta | null } | null>(null);
+  const [vals, setVals] = useState<string[]>([]);
+  const [res, setRes] = useState<PredictResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setRes(null);
+    api.artifacts(run.run_id).then((i) => { setInfo(i); setVals((i.meta?.features ?? []).map(() => '0')); }).catch(() => setInfo({ files: [], meta: null }));
+  }, [run.run_id]);
+  if (!info) return null;
+  const meta = info.meta;
+  const go = async () => {
+    setBusy(true);
+    try { setRes(await api.predict(run.run_id, [vals.map(Number)])); } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="row sp"><b>Model · {run.run_name} <span className="mono" style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{run.run_id.slice(0, 8)}</span></b>
+        {meta && <span className="tag">{meta.task}</span>}</div>
+      {!meta ? <p className="hint" style={{ marginTop: 8 }}>This run exported no model. Train a graph component (Components or Builder) to get weights, TorchScript and ONNX.</p> : (
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', marginTop: 12 }}>
+          <div>
+            <div className="stat-title">Exports</div>
+            <div className="chips" style={{ margin: '8px 0' }}>
+              {info.files.map((f) => <a key={f.name} className="chip on" href={`/api/tracking/runs/${run.run_id}/artifacts/${f.name}`} download title="Download">{f.name} · {bytes(f.bytes)}</a>)}
+            </div>
+            <p className="hint">TorchScript loads with <span className="mono">torch.jit.load</span> and needs no Sentinel code. <span className="mono">sentinel model predict {run.run_id.slice(0, 8)} -i …</span> does the same from the terminal.</p>
+          </div>
+          <div>
+            <div className="stat-title">Try it</div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', margin: '8px 0' }}>
+              {meta.features.map((f, i) => (
+                <label key={f} className="field" style={{ margin: 0 }}><span style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>{f}</span>
+                  <input type="number" step="any" value={vals[i] ?? ''} onChange={(e) => setVals((v) => v.map((x, j) => (j === i ? e.target.value : x)))} aria-label={f} />
+                </label>
+              ))}
+            </div>
+            <button className="btn primary sm" onClick={go} disabled={busy || vals.some((v) => v === '' || Number.isNaN(Number(v)))}>{busy ? 'Running…' : 'Predict'}</button>
+            {res?.task === 'classification' && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 16, fontWeight: 600 }}>{res.predictions[0].label}</div>
+                {Object.entries(res.predictions[0].probabilities).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([c, p]) => (
+                  <div key={c} className="row" style={{ gap: 8, margin: '4px 0' }}><span className="mono" style={{ width: 90, fontSize: 11 }}>{c}</span>
+                    <div className="bar" style={{ flex: 1, margin: 0 }}><div style={{ width: `${p * 100}%` }} /></div><span className="mono" style={{ fontSize: 11, width: 44, textAlign: 'right' }}>{(p * 100).toFixed(1)}%</span></div>
+                ))}
+              </div>
+            )}
+            {res?.task === 'regression' && <div className="stat-value" style={{ marginTop: 10 }}>{res.values[0].map((v) => +v.toPrecision(5)).join(', ')}</div>}
+            {res?.task === 'vae' && <div className="mono" style={{ fontSize: 12, marginTop: 10 }}>reconstruction {JSON.stringify(res.reconstruction[0].map((v) => +v.toPrecision(4)))}<br />latent mean {JSON.stringify(res.latent_mean[0].map((v) => +v.toPrecision(4)))}</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Experiments({ go }: { go: (t: string) => void }) {
   const runs = usePoll(api.trackedRuns, 2000);
@@ -50,6 +110,7 @@ export function Experiments({ go }: { go: (t: string) => void }) {
           ))}
         </div>
       )}
+      {picked.length > 0 && list.find((r) => r.run_id === picked[0]) && <ModelPanel run={list.find((r) => r.run_id === picked[0])!} />}
       <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
         <table>
           <thead><tr><th /><th>Run</th><th>Status</th><th>Started</th><th>Time</th>

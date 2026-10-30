@@ -1,4 +1,5 @@
 mod diag;
+mod models;
 
 use clap::{Parser, Subcommand};
 use sentinel_core::export::ScriptExporter;
@@ -56,6 +57,11 @@ enum Commands {
         component: String,
         #[arg(short, long, default_value = "train_standalone.py")]
         output: String,
+    },
+    /// Use trained models: list exports, predict on new data, copy weights/TorchScript/ONNX out
+    Model {
+        #[command(subcommand)]
+        command: ModelCommands,
     },
     /// One-shot system vitals: CPU, memory, swap, load, GPUs, and the daemon's jobs
     Status {
@@ -138,6 +144,31 @@ enum ComponentCommands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum ModelCommands {
+    /// Runs that exported a model
+    List,
+    /// Predict from a run's TorchScript model: --input "5.1,3.5" (repeat for several rows)
+    Predict {
+        /// Run id or any unambiguous prefix (see `sentinel model list`)
+        run: String,
+        #[arg(short, long = "input", value_name = "V1,V2,...", required = true)]
+        input: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy an exported file out of a run
+    Export {
+        run: String,
+        /// torchscript | onnx | weights | meta | script
+        #[arg(short, long, default_value = "torchscript")]
+        format: String,
+        /// Destination (default: ./<run>-<file>)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -164,6 +195,7 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
+        Some(Commands::Model { command }) => models::run(command)?,
         Some(Commands::Status { json, port }) => diag::status(json, port)?,
         Some(Commands::Top { interval, port, procs }) => diag::top(interval, port, procs).await?,
         Some(Commands::Gpus { json }) => diag::gpus(json)?,

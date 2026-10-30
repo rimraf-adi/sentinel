@@ -119,6 +119,27 @@ fn summarize(exp: &str, run_dir: &Path) -> Option<RunSummary> {
     })
 }
 
+/// Directory holding a run's files, or None for an unknown or malformed id.
+pub fn run_dir(root: &Path, run_id: &str) -> Option<PathBuf> {
+    if !valid_run_id(run_id) {
+        return None;
+    }
+    experiments(root).into_iter().map(|(_, d)| d.join(run_id)).find(|d| d.is_dir())
+}
+
+/// Accept a full run id or any unambiguous prefix (as `git` does).
+pub fn resolve_run_id(root: &Path, prefix: &str) -> Result<String, String> {
+    if !valid_run_id(prefix) {
+        return Err(format!("'{prefix}' is not a run id"));
+    }
+    let matches: Vec<String> = list_runs(root).into_iter().map(|r| r.run_id).filter(|id| id.starts_with(prefix)).collect();
+    match matches.as_slice() {
+        [one] => Ok(one.clone()),
+        [] => Err(format!("no run starts with '{prefix}'")),
+        many => Err(format!("'{prefix}' matches {} runs; give more characters", many.len())),
+    }
+}
+
 /// All tracked runs, newest first.
 pub fn list_runs(root: &Path) -> Vec<RunSummary> {
     let mut runs = Vec::new();

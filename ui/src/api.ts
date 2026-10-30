@@ -123,6 +123,14 @@ export interface TrackedRun {
 export interface CsvColumn { name: string; kind: 'numeric' | 'integer' | 'categorical'; distinct: number; distinct_capped: boolean; missing: number; examples: string[] }
 export interface Suggestion { target: string; features: string[]; task: 'classification' | 'regression'; loss: string; outputs: number }
 export interface CsvSchema { rows: number; columns: CsvColumn[]; suggestion: Suggestion | null }
+export interface ModelMeta {
+  graph: string; task: 'classification' | 'regression' | 'vae'; features: string[]; target: string | null; classes: string[] | null;
+  input_shape: number[]; loss: string; files: Record<string, string>; [k: string]: unknown;
+}
+export type PredictResult =
+  | { task: 'classification'; predictions: { label: string; index: number; probabilities: Record<string, number> }[] }
+  | { task: 'regression'; values: number[][] }
+  | { task: 'vae'; reconstruction: number[][]; latent_mean: number[][] };
 export interface BlockParam {
   name: string;
   required: boolean;
@@ -233,6 +241,8 @@ export const api = {
     post<{ ok: true; component_id: string; path: string }>('/api/components/save', b),
   schemaOfDataset: (name: string) => req<CsvSchema>(`/api/datasets/${encodeURIComponent(name)}/schema`),
   schemaOfPath: (path: string) => req<CsvSchema>(`/api/schema?path=${encodeURIComponent(path)}`),
+  artifacts: (id: string) => req<{ files: { name: string; bytes: number }[]; meta: ModelMeta | null }>(`/api/tracking/runs/${id}/artifacts`),
+  predict: (run_id: string, inputs: number[][]) => post<PredictResult>('/api/predict', { run_id, inputs }),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
   saveBlock: (b: { name: string; family: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
     post<{ ok: true; name: string; path: string }>('/api/blocks/save', b),
