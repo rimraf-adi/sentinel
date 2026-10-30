@@ -323,6 +323,30 @@ impl DashboardView {
             .collect::<Vec<_>>()
             .join("\n");
 
+        // Visibility rule: "templates should be visible only when we initialise; once metrics are visible, no need to show templates again"
+        let has_metrics = !jobs.is_empty();
+        let overview_templates_html = if is_sentinel && !has_metrics {
+            format!(
+                r##"<div class="overview-templates-section">
+                    <div class="section-header" style="margin-top: 6px;">
+                        <div>
+                            <div class="section-eyebrow">GET STARTED / ML RECIPES</div>
+                            <h2 class="section-title">Choose a Recipe to Start Training</h2>
+                            <div class="section-subtitle">Workspace initialized. Select an ML template below to configure hyperparameters and launch your first experiment.</div>
+                        </div>
+                        <span class="badge-count font-mono">{} recipes</span>
+                    </div>
+                    <div class="template-grid" style="margin-bottom: 28px;">
+                        {}
+                    </div>
+                </div>"##,
+                templates.len(),
+                templates_cards_html
+            )
+        } else {
+            String::new()
+        };
+
         format!(
             r###"<!DOCTYPE html>
 <html lang="en">
@@ -1433,7 +1457,10 @@ impl DashboardView {
                 <!-- NOT A SENTINEL REPO WARNING (IDENTIFIED VIA SENTINEL.LOCK) -->
                 {repo_alert_html}
 
-                <!-- RECENT RUN CARD (BLANK WHEN NO RUNS — NO DEMO DATA) -->
+                <!-- TEMPLATES VISIBLE ON INITIALIZATION (HIDDEN ONCE METRICS ARE VISIBLE) -->
+                {overview_templates_html}
+
+                <!-- RECENT RUN CARD (VISIBLE ONCE METRICS EXIST — STRICTLY NO DEMO DATA) -->
                 {recent_run_html}
 
                 <!-- PROJECTS SECTION -->
@@ -1962,6 +1989,7 @@ impl DashboardView {
             repo_status_pill = repo_status_pill,
             top_status_pill = top_status_pill,
             repo_alert_html = repo_alert_html,
+            overview_templates_html = overview_templates_html,
             jobs_count = jobs.len(),
             recent_run_html = recent_run_html,
             projects_html = projects_html,
@@ -1994,6 +2022,18 @@ mod tests {
         assert!(html.contains("No projects registered yet"));
         // Never contains demo run data
         assert!(!html.contains("job-Custom Command Runner"));
+
+        // When initialized with no runs: templates are visible on Overview to get started
+        if state.is_sentinel_repo {
+            assert!(html.contains("Choose a Recipe to Start Training"));
+        }
+
+        // Once metrics/runs are visible: templates are hidden on Overview
+        let dummy_spec = sentinel_core::models::JobSpec::new("active-training-experiment", sentinel_core::models::RunMode::Command);
+        let dummy_job = sentinel_core::models::JobRecord::new(dummy_spec);
+        let html_with_metrics = DashboardView::render_html(&state, None, &[dummy_job], &[]);
+        assert!(!html_with_metrics.contains("Choose a Recipe to Start Training"));
+        assert!(html_with_metrics.contains("active-training-experiment"));
 
         // If sentinel.lock does not exist, indicates not a sentinel repo
         if !state.is_sentinel_repo {
