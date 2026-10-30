@@ -162,7 +162,12 @@ uxML/
 
 ### 6. `crates/sentinel-ui` (Web Dashboard & State Engine)
 * **`src/state.rs`**: Manages dashboard mode transitions (`ReadOnly` $\to$ `Editing` $\to$ `Idle`). Features an automated idle detector that transitions to low-power `Idle` mode after 15 seconds of inactivity to shed event listeners and slow down polling.
-* **`src/view.rs`**: Standalone HTML view generator rendering CPU/RAM gauges, GPU compute & VRAM dials, job supervisor tables, template cards, and vanilla JavaScript idle controller.
+* **`src/view.rs`**: Standalone HTML view generator rendering a minimalist, clean black-and-white interface inspired by Vercel's Geist design system. Includes:
+  * Left sidebar navigation (`Overview`, `Runs`, `Sweeps`, `Templates`, `Datasets`, `Machines`, `Code (Read-Only)`).
+  * Recent run hero card with live status pills, duration, worker info, progress bar, and elegant empty-state handling.
+  * Git Repos / Projects overview with clean empty-state fallback when no external projects are configured.
+  * Fully interactive & editable template configurator modal and custom command runner.
+  * Strictly read-only IDE code viewer for project files and recipes with zero memory bloat.
 
 ---
 
