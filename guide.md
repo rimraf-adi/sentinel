@@ -30,16 +30,16 @@ test -f sentinel.yaml || test -d templates/ && echo "Sentinel codebase detected"
 # 2. Check if Sentinel CLI binary is available
 which sentinel || test -f target/debug/sentinel && echo "Sentinel binary found"
 
-# 3. Check if Sentinel Daemon is running
-curl -s http://localhost:8080/api/health
+# 3. Check if Sentinel Daemon is running (default port: 2512)
+curl -s http://localhost:2512/api/health
 ```
 
 If the daemon is offline, launch it as a background process:
 ```bash
-# Start Sentinel daemon on port 8080
-sentinel dev --port 8080 &
+# Start Sentinel daemon (runs on default port 2512)
+sentinel dev &
 # Or via debug target:
-target/debug/sentinel dev --port 8080 &
+target/debug/sentinel dev &
 ```
 
 ---
@@ -52,7 +52,7 @@ Sentinel enforces declarative, reproducible experiments via YAML templates with 
 ```bash
 sentinel template list
 # Or via API:
-curl -s http://localhost:8080/api/templates | jq .
+curl -s http://localhost:2512/api/templates | jq .
 ```
 
 ### Validating a Template Before Execution
@@ -79,7 +79,7 @@ sentinel template new my-model-recipe --extends templates/vision/image-classific
 ### Launching via REST API (Recommended for Agents)
 Send a `POST` request to `/api/jobs/run-template` with parameter overrides:
 ```bash
-curl -X POST http://localhost:8080/api/jobs/run-template \
+curl -X POST http://localhost:2512/api/jobs/run-template \
   -H "Content-Type: application/json" \
   -d '{
     "template_id": "vision/image-classification@v1",
@@ -95,7 +95,7 @@ Response returns the `JobRecord` with unique `spec.id` and worker `pid`.
 ### Launching Custom Scripts (Command Mode)
 For non-template arbitrary Python scripts, submit via `/api/jobs`:
 ```bash
-curl -X POST http://localhost:8080/api/jobs \
+curl -X POST http://localhost:2512/api/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "name": "bert-finetune",
@@ -107,16 +107,16 @@ curl -X POST http://localhost:8080/api/jobs \
 ### Monitoring Active Jobs & Fetching Logs
 ```bash
 # List all jobs
-curl -s http://localhost:8080/api/jobs | jq .
+curl -s http://localhost:2512/api/jobs | jq .
 
 # Stream or fetch logs for a specific job
-curl -s http://localhost:8080/api/jobs/<JOB_ID>/logs | jq .logs
+curl -s http://localhost:2512/api/jobs/<JOB_ID>/logs | jq .logs
 ```
 
 ### Terminating a Run
 If a job is diverging, stuck, or requested to stop:
 ```bash
-curl -X POST http://localhost:8080/api/jobs/<JOB_ID>/stop
+curl -X POST http://localhost:2512/api/jobs/<JOB_ID>/stop
 ```
 The daemon sends `SIGTERM`, waits for child drain, and frees GPU slots in the dynamic pool.
 

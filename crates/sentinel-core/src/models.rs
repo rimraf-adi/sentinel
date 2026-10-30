@@ -166,7 +166,7 @@ impl MachineSpec {
             name: "Local Machine".to_string(),
             host: "127.0.0.1".to_string(),
             user: None,
-            port: 8080,
+            port: 2512,
             is_local: true,
             agent_connected: true,
         }

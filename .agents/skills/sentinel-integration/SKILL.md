@@ -36,10 +36,10 @@ if [ -f "sentinel.yaml" ] || [ -d "templates" ]; then
     echo "Sentinel codebase detected."
 fi
 
-# Ensure local daemon is running
-curl -s http://localhost:8080/api/health || {
+# Ensure local daemon is running (default port: 2512)
+curl -s http://localhost:2512/api/health || {
     echo "Starting Sentinel daemon..."
-    target/debug/sentinel dev --port 8080 &
+    target/debug/sentinel dev &
 }
 ```
 
@@ -64,7 +64,7 @@ sentinel template check templates/vision/image-classification.yaml
 To launch a training run, call the Axum REST API:
 
 ```bash
-curl -X POST http://localhost:8080/api/jobs/run-template \
+curl -X POST http://localhost:2512/api/jobs/run-template \
   -H "Content-Type: application/json" \
   -d '{
     "template_id": "vision/image-classification@v1",
@@ -82,10 +82,10 @@ Query active jobs and retrieve execution logs:
 
 ```bash
 # List jobs
-curl -s http://localhost:8080/api/jobs | jq .
+curl -s http://localhost:2512/api/jobs | jq .
 
 # Tail logs for a specific job
-curl -s http://localhost:8080/api/jobs/<JOB_ID>/logs | jq -r '.logs[]'
+curl -s http://localhost:2512/api/jobs/<JOB_ID>/logs | jq -r '.logs[]'
 ```
 
 ### 4. Stopping an Experiment
@@ -93,7 +93,7 @@ curl -s http://localhost:8080/api/jobs/<JOB_ID>/logs | jq -r '.logs[]'
 To abort a diverging or failing training run:
 
 ```bash
-curl -X POST http://localhost:8080/api/jobs/<JOB_ID>/stop
+curl -X POST http://localhost:2512/api/jobs/<JOB_ID>/stop
 ```
 
 ### 5. Running Hyperparameter Sweeps (Optuna ASHA)
@@ -140,5 +140,5 @@ run.finish()
 Before finishing a task:
 1. Run `cargo test --workspace` to ensure no Rust regressions.
 2. Run `uv run pytest packages/sentinel-sdk/tests/` to verify Python telemetry.
-3. Check `curl -s http://localhost:8080/api/hardware` to verify all GPU slots have been released.
+3. Check `curl -s http://localhost:2512/api/hardware` to verify all GPU slots have been released.
 4. Ensure git commit messages are simple and descriptive.

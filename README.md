@@ -105,11 +105,11 @@ uv sync
 # Compile the Sentinel CLI
 cargo build -p sentinel-cli
 
-# Start the local daemon and web interface
-target/debug/sentinel dev --port 8080
+# Start the local daemon and web interface (defaults to port 2512)
+target/debug/sentinel dev
 ```
 
-Open your browser at **`http://localhost:8080`** to view the Vercel-style training control dashboard.
+Open your browser at **`http://localhost:2512`** to view the Vercel-style training control dashboard.
 
 ---
 
@@ -117,7 +117,7 @@ Open your browser at **`http://localhost:8080`** to view the Vercel-style traini
 
 | Command | Description |
 | :--- | :--- |
-| `sentinel dev [--port 8080]` | Starts the Axum daemon REST/WebSocket server and serves the web UI |
+| `sentinel dev [--port 2512]` | Starts the Axum daemon REST/WebSocket server and serves the web UI (default: 2512) |
 | `sentinel new <project-name>` | Scaffolds a new project repository with conventions and configs |
 | `sentinel template list` | Lists all built-in and custom templates in the registry |
 | `sentinel template new <name> [--extends <parent>]` | Generates a custom template starter YAML |
