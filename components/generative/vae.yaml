@@ -1,0 +1,29 @@
+schema_version: "1.0"
+component_id: "generative/vae@v1"
+name: "Variational Autoencoder"
+description: "Learns to reconstruct tabular data through a small latent space. Uses the vae_encoder and vae_decoder compounds and the sampling block; trains with reconstruction + beta * KL"
+domain: "generative"
+parameters:
+  features: {type: int, default: 2, range: [1, 4096], help: "Input feature count"}
+  latent: {type: int, default: 2, range: [1, 256], help: "Latent dimensions"}
+  hidden: {type: int, default: 32, range: [2, 2048], help: "Encoder/decoder width"}
+  beta: {type: float, default: 0.1, range: [0.0, 100.0], help: "Weight of the KL term (0 = plain autoencoder)"}
+  lr: {type: float, default: 0.005, range: [0.00001, 0.5], help: "Learning rate"}
+  epochs: {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
+  csv: {type: string, default: "data/demo.csv", help: "Training CSV"}
+  feature_cols: {type: string, default: "x1,x2", help: "Comma-separated numeric feature columns"}
+graph:
+  inputs: {x: [B, "${features}"]}
+  nodes:
+    enc: {block: vae_encoder, params: {latent: "${latent}", hidden: "${hidden}"}}
+    z:   {block: sampling}
+    dec: {block: vae_decoder, params: {features: "${features}", hidden: "${hidden}"}}
+  edges: ["x -> enc", "enc.mu -> z.mu", "enc.logvar -> z.logvar", "z -> dec"]
+  outputs: {recon: dec, mu: enc.mu, logvar: enc.logvar}
+  training:
+    loss: vae
+    optimizer: adam
+    lr: "${lr}"
+    epochs: "${epochs}"
+    beta: "${beta}"
+    data: {csv: "${csv}", features: "${feature_cols}"}

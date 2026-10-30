@@ -80,6 +80,8 @@ pub struct DataSpec {
     /// A YAML list, or one comma-separated string (so it can be a single `${param}`).
     #[serde(deserialize_with = "list_or_csv")]
     pub features: Vec<String>,
+    /// Target column. Unsupervised losses (`vae`) need none.
+    #[serde(default)]
     pub target: String,
     /// Per-sample shape the feature vector is reshaped to (e.g. [2, 1] for a sequence).
     #[serde(default)]
@@ -119,7 +121,14 @@ pub struct TrainingSpec {
     pub epochs: u32,
     #[serde(default)]
     pub batch_size: Option<usize>,
+    /// Weight of the KL term for the `vae` loss.
+    #[serde(default = "default_beta")]
+    pub beta: f64,
     pub data: DataSpec,
+}
+
+fn default_beta() -> f64 {
+    1.0
 }
 
 fn default_optimizer() -> String {

@@ -1,0 +1,14 @@
+compound: vae_encoder
+family: generative
+description: "VAE encoder: an mlp_block body and two linear heads producing the latent mean and log-variance"
+params:
+  latent: {help: "Latent dimensions"}
+  hidden: {default: 32, help: "Width of the body"}
+graph:
+  inputs: {in: [B, F]}
+  nodes:
+    body:   {block: mlp_block, params: {width: "${hidden}"}}
+    mu:     {block: linear, params: {out: "${latent}"}}
+    logvar: {block: linear, params: {out: "${latent}"}}
+  edges: ["in -> body", "body -> mu", "body -> logvar"]
+  outputs: {logvar: logvar, mu: mu}

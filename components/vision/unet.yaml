@@ -1,0 +1,31 @@
+schema_version: "1.0"
+component_id: "vision/unet@v1"
+name: "U-Net"
+description: "Two-level U-Net for segmentation, built from unet_down and unet_up compounds, which are built from conv_block compounds"
+domain: "vision"
+parameters:
+  channels: {type: int, default: 3, range: [1, 64], help: "Input channels"}
+  size: {type: int, default: 32, range: [8, 1024], help: "Image height/width (divisible by 4)"}
+  c1: {type: int, default: 16, range: [2, 512], help: "Channels at full resolution"}
+  c2: {type: int, default: 32, range: [2, 1024], help: "Channels at half resolution"}
+  c3: {type: int, default: 64, range: [2, 2048], help: "Bottleneck channels"}
+  classes: {type: int, default: 2, range: [1, 256], help: "Output classes per pixel"}
+graph:
+  inputs: {img: [B, "${channels}", "${size}", "${size}"]}
+  nodes:
+    d1:  {block: unet_down, params: {channels: "${c1}"}}
+    d2:  {block: unet_down, params: {channels: "${c2}"}}
+    mid: {block: conv_block, params: {channels: "${c3}"}}
+    u2:  {block: unet_up, params: {channels: "${c2}"}}
+    u1:  {block: unet_up, params: {channels: "${c1}"}}
+    out: {block: conv2d, params: {out_channels: "${classes}", kernel: 1, padding: 0}}
+  edges:
+    - img -> d1
+    - d1.down -> d2
+    - d2.down -> mid
+    - mid -> u2.x
+    - d2.skip -> u2.skip
+    - u2 -> u1.x
+    - d1.skip -> u1.skip
+    - u1 -> out
+  outputs: {mask: out}

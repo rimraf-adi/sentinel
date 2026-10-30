@@ -20,7 +20,7 @@ fn graph(yaml: &str) -> Result<sentinel_core::graph::ValidatedGraph, GraphError>
 fn every_shipped_graph_component_validates() {
     let r = registry();
     let graphs: Vec<_> = r.list().into_iter().filter(|c| c.graph.is_some()).collect();
-    assert!(graphs.len() >= 7, "expected >= 6 graph components, got {}", graphs.len());
+    assert!(graphs.len() >= 11, "expected >= 6 graph components, got {}", graphs.len());
     for c in graphs {
         c.build_graph(&HashMap::new()).unwrap_or_else(|e| panic!("{}: {e}", c.component_id));
     }

@@ -1,0 +1,14 @@
+compound: unet_up
+family: vision
+description: "U-Net decoder stage: transposed convolution, concatenate the skip connection, two conv_blocks"
+params:
+  channels: {help: "Output channels (the skip connection must have this many channels)"}
+graph:
+  inputs: {skip: [B, "${channels}", H, W], x: [B, C, h, w]}
+  nodes:
+    up:   {block: conv_transpose2d, params: {out_channels: "${channels}"}}
+    join: {block: concat, params: {axis: 1}}
+    c1:   {block: conv_block, params: {channels: "${channels}"}}
+    c2:   {block: conv_block, params: {channels: "${channels}"}}
+  edges: ["x -> up", "skip -> join.a", "up -> join.b", "join -> c1", "c1 -> c2"]
+  outputs: {out: c2}

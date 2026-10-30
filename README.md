@@ -97,6 +97,10 @@ graph:
   with live shapes), and **Save as -> Compound block** turns the canvas into a new palette block.
 - `sentinel component show <model>` prints the whole tree; `sentinel component blocks` lists both tiers.
 
+Shipped compound blocks: `mlp_block`, `residual_mlp_block`, `conv_block`, `resnet_block`, `transformer_block`, `unet_down`, `unet_up`,
+`vae_encoder`, `vae_decoder`. Shipped models built from them include `vision/vit-tiny`, `vision/unet`, `vision/resnet-mini`,
+`generative/vae` (trained with reconstruction + beta * KL) and `tabular/deep-residual-mlp`.
+
 ## Footprint
 
 Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with

@@ -277,6 +277,11 @@ const SHIPPED: &[&str] = &[
     include_str!("../../../blocks/core/residual_mlp_block.yaml"),
     include_str!("../../../blocks/vision/conv_block.yaml"),
     include_str!("../../../blocks/vision/resnet_block.yaml"),
+    include_str!("../../../blocks/vision/unet_down.yaml"),
+    include_str!("../../../blocks/vision/unet_up.yaml"),
+    include_str!("../../../blocks/attention/transformer_block.yaml"),
+    include_str!("../../../blocks/generative/vae_encoder.yaml"),
+    include_str!("../../../blocks/generative/vae_decoder.yaml"),
 ];
 
 static GLOBAL: OnceLock<RwLock<Arc<BlockLibrary>>> = OnceLock::new();

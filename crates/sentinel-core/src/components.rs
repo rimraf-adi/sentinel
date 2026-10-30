@@ -321,6 +321,10 @@ smoke_test:
             include_str!("../../../components/sequence/lstm-classifier.yaml"),
             include_str!("../../../components/sequence/transformer-classifier.yaml"),
             include_str!("../../../components/vision/cnn-classifier.yaml"),
+            include_str!("../../../components/vision/vit-tiny.yaml"),
+            include_str!("../../../components/vision/unet.yaml"),
+            include_str!("../../../components/vision/resnet-mini.yaml"),
+            include_str!("../../../components/generative/vae.yaml"),
             include_str!("../../../components/graph/gcn-classifier.yaml"),
         ];
         for y in SHIPPED {

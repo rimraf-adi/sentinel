@@ -121,6 +121,10 @@ pub fn generate_model(g: &ValidatedGraph) -> String {
     out
 }
 
+fn feats_literal(features: &[String]) -> String {
+    features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
+}
+
 /// Emit a complete standalone training script. Requires a `training` section and one input/output.
 pub fn generate_training_script(g: &ValidatedGraph, graph_id: &str) -> Result<String, GraphError> {
     let t = g
@@ -131,10 +135,24 @@ pub fn generate_training_script(g: &ValidatedGraph, graph_id: &str) -> Result<St
     if g.spec.inputs.len() != 1 {
         return Err(GraphError::Training("training scripts need exactly one graph input".into()));
     }
-    if g.outputs.len() != 1 {
-        return Err(GraphError::Training("training scripts need exactly one graph output".into()));
+    let vae = t.loss == "vae";
+    if vae {
+        let keys: Vec<&str> = g.outputs.keys().map(|k| k.as_str()).collect();
+        if keys != ["logvar", "mu", "recon"] {
+            return Err(GraphError::Training(format!("the vae loss needs the graph outputs `recon`, `mu` and `logvar`, found {keys:?}")));
+        }
+        if !t.data.target.is_empty() {
+            return Err(GraphError::Training("the vae loss is unsupervised: remove `data.target`".into()));
+        }
+    } else {
+        if g.outputs.len() != 1 {
+            return Err(GraphError::Training("training scripts need exactly one graph output".into()));
+        }
+        if t.data.target.is_empty() {
+            return Err(GraphError::Training("`data.target` is required for this loss".into()));
+        }
     }
-    if !["cross_entropy", "mse", "bce_logits"].contains(&t.loss.as_str()) {
+    if !["cross_entropy", "mse", "bce_logits", "vae"].contains(&t.loss.as_str()) {
         return Err(GraphError::Training(format!("unsupported loss '{}'", t.loss)));
     }
     let opt = match t.optimizer.as_str() {
@@ -151,9 +169,12 @@ pub fn generate_training_script(g: &ValidatedGraph, graph_id: &str) -> Result<St
     let loss_ctor = match t.loss.as_str() {
         "cross_entropy" => "nn.CrossEntropyLoss()",
         "mse" => "nn.MSELoss()",
+        "vae" => "None",
         _ => "nn.BCEWithLogitsLoss()",
     };
-    let label_code = if classification {
+    let label_code = if vae {
+        "Y = X  # unsupervised: the data is its own target".to_string()
+    } else if classification {
         format!(
             r#"def _class_key(v):
     try:
@@ -182,7 +203,24 @@ print("classes:", CLASSES, flush=True)"#,
     } else {
         "loss_fn(model(xte), yte.view_as(model(xte))).item()"
     };
-    let metric_name = if classification { "test_acc" } else { "test_loss" };
+    let metric_name = if vae { "test_recon" } else if classification { "test_acc" } else { "test_loss" };
+    // The per-batch loss, the evaluation, and what gets logged differ for the VAE (reconstruction + beta * KL).
+    let step_code = if vae {
+        "        recon = ((out[\"recon\"] - xb) ** 2).mean()\n        kl = -0.5 * (1 + out[\"logvar\"] - out[\"mu\"] ** 2 - out[\"logvar\"].exp()).mean()\n        loss = recon + BETA * kl".to_string()
+    } else {
+        format!("        loss = {loss_call}")
+    };
+    let eval_code = if vae {
+        "            o = model(xte)\n            metric = ((o[\"recon\"] - xte) ** 2).mean().item()".to_string()
+    } else {
+        format!("            metric = {metric}")
+    };
+    let log_dict = if vae {
+        format!("{{\"train_loss\": loss.item(), \"recon\": recon.item(), \"kl\": kl.item(), \"{metric_name}\": metric}}")
+    } else {
+        format!("{{\"train_loss\": loss.item(), \"{metric_name}\": metric}}")
+    };
+    let used_cols = if vae { feats_literal(&t.data.features) } else { format!("{}, {:?}", feats_literal(&t.data.features), t.data.target) };
     let reshape = match &t.data.reshape {
         Some(r) => format!(
             "\nX = X.reshape(X.shape[0], {})",
@@ -190,7 +228,7 @@ print("classes:", CLASSES, flush=True)"#,
         ),
         None => String::new(),
     };
-    let feats = t.data.features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ");
+    let feats = feats_literal(&t.data.features);
     let bs = t.batch_size.map(|b| b.to_string()).unwrap_or_else(|| "len(xtr)".into());
     let model_code = generate_model(g);
     // Record the model's resolved hyperparameters so runs can be compared by them.
@@ -201,7 +239,7 @@ print("classes:", CLASSES, flush=True)"#,
         .collect();
     let cfg = serde_json::to_string(&serde_json::json!({
         "graph": graph_id, "loss": t.loss, "optimizer": t.optimizer, "lr": t.lr,
-        "epochs": t.epochs, "batch_size": t.batch_size, "model": model_params,
+        "epochs": t.epochs, "batch_size": t.batch_size, "beta": t.beta, "model": model_params,
     }))
     .unwrap();
 
@@ -218,7 +256,7 @@ import torch.nn as nn
 torch.manual_seed({seed})
 with open({csv:?}, newline="") as f:
     rows = list(csv.DictReader(f, skipinitialspace=True))
-_used = [{feats}, {target:?}]
+_used = [{used_cols}]
 _total = len(rows)
 rows = [r for r in rows if all((r.get(c) or "").strip() != "" for c in _used)]
 if len(rows) < _total:
@@ -244,6 +282,7 @@ except Exception:
     sentinel = None
 
 BATCH = {bs}
+BETA = {beta}
 for epoch in range({epochs}):
     model.train(True)
     order = torch.randperm(len(xtr))
@@ -252,22 +291,22 @@ for epoch in range({epochs}):
         xb, yb = xtr[idx], ytr[idx]
         optimizer.zero_grad()
         out = model(xb)
-        loss = {loss_call}
+{step_code}
         loss.backward()
         optimizer.step()
     if epoch % 10 == 0 or epoch == {epochs} - 1:
         model.train(False)
         with torch.no_grad():
-            metric = {metric}
+{eval_code}
         print(f"epoch {{epoch:3d}} loss {{loss.item():.4f}} {metric_name} {{metric:.4f}}", flush=True)
         if sentinel:
-            sentinel.log({{"train_loss": loss.item(), "{metric_name}": metric}}, step=epoch)
+            sentinel.log({log_dict}, step=epoch)
 if sentinel:
     sentinel.finish()
 "#,
         seed = t.data.seed,
         csv = t.data.csv,
-        target = t.data.target,
+        beta = t.beta,
         split = t.data.test_split,
         lr = t.lr,
         epochs = t.epochs,

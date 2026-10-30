@@ -1,0 +1,13 @@
+compound: unet_down
+family: vision
+description: "U-Net encoder stage: two conv_blocks, then 2x downsampling. Outputs both the downsampled map and the skip connection"
+params:
+  channels: {help: "Output channels of both convolutions"}
+graph:
+  inputs: {in: [B, C, H, W]}
+  nodes:
+    c1:   {block: conv_block, params: {channels: "${channels}"}}
+    c2:   {block: conv_block, params: {channels: "${channels}"}}
+    pool: {block: maxpool2d}
+  edges: ["in -> c1", "c1 -> c2", "c2 -> pool"]
+  outputs: {down: pool, skip: c2}

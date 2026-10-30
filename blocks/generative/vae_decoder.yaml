@@ -1,0 +1,13 @@
+compound: vae_decoder
+family: generative
+description: "VAE decoder: an mlp_block body and a linear layer back to the data dimensions"
+params:
+  features: {help: "Output dimensions (the data's feature count)"}
+  hidden: {default: 32, help: "Width of the body"}
+graph:
+  inputs: {in: [B, Z]}
+  nodes:
+    body: {block: mlp_block, params: {width: "${hidden}"}}
+    out:  {block: linear, params: {out: "${features}"}}
+  edges: ["in -> body", "body -> out"]
+  outputs: {out: out}

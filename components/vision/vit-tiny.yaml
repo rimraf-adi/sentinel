@@ -1,0 +1,27 @@
+schema_version: "1.0"
+component_id: "vision/vit-tiny@v1"
+name: "ViT Tiny"
+description: "Vision Transformer: patch embedding, CLS token, position encoding, two transformer_block compounds, classification head"
+domain: "vision"
+parameters:
+  channels: {type: int, default: 3, range: [1, 64], help: "Input channels"}
+  size: {type: int, default: 32, range: [8, 512], help: "Image height/width (divisible by patch)"}
+  patch: {type: int, default: 8, range: [1, 64], help: "Patch size"}
+  dim: {type: int, default: 64, range: [8, 1024], help: "Embedding size (divisible by heads)"}
+  heads: {type: int, default: 4, range: [1, 16], help: "Attention heads"}
+  ff: {type: int, default: 128, range: [8, 4096], help: "Feed-forward width"}
+  max_len: {type: int, default: 512, range: [2, 100000], help: "Longest token sequence (patches + 1)"}
+  classes: {type: int, default: 10, range: [2, 1000], help: "Number of classes"}
+graph:
+  inputs: {img: [B, "${channels}", "${size}", "${size}"]}
+  nodes:
+    patches: {block: patch_embed, params: {dim: "${dim}", patch: "${patch}"}}
+    cls:     {block: cls_token}
+    pos:     {block: positional_encoding, params: {max_len: "${max_len}"}}
+    t1:      {block: transformer_block, params: {dim: "${dim}", heads: "${heads}", ff: "${ff}"}}
+    t2:      {block: transformer_block, params: {dim: "${dim}", heads: "${heads}", ff: "${ff}"}}
+    norm:    {block: layernorm}
+    pick:    {block: cls_select}
+    head:    {block: linear, params: {out: "${classes}"}}
+  edges: ["img -> patches", "patches -> cls", "cls -> pos", "pos -> t1", "t1 -> t2", "t2 -> norm", "norm -> pick", "pick -> head"]
+  outputs: {logits: head}

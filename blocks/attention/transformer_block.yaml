@@ -1,0 +1,29 @@
+compound: transformer_block
+family: attention
+description: "Pre-norm transformer block: self-attention and an MLP, each with a residual connection. Built from the compound mlp_block"
+params:
+  dim: {help: "Embedding size (must equal the input's last dimension)"}
+  heads: {default: 4, help: "Attention heads (must divide dim)"}
+  ff: {default: 256, help: "Feed-forward width"}
+  dropout: {default: 0.0, help: "Dropout inside the feed-forward"}
+graph:
+  inputs: {in: [B, T, "${dim}"]}
+  nodes:
+    ln1:  {block: layernorm}
+    attn: {block: attention, params: {heads: "${heads}"}}
+    add1: {block: add}
+    ln2:  {block: layernorm}
+    ff:   {block: mlp_block, params: {width: "${ff}", activation: gelu, dropout: "${dropout}"}}
+    proj: {block: linear, params: {out: "${dim}"}}
+    add2: {block: add}
+  edges:
+    - in -> ln1
+    - ln1 -> attn
+    - attn -> add1.a
+    - in -> add1.b
+    - add1 -> ln2
+    - ln2 -> ff
+    - ff -> proj
+    - proj -> add2.a
+    - add1 -> add2.b
+  outputs: {out: add2}

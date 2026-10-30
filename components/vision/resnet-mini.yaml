@@ -1,0 +1,23 @@
+schema_version: "1.0"
+component_id: "vision/resnet-mini@v1"
+name: "ResNet Mini"
+description: "Small ResNet: a conv_block stem, resnet_block compounds at two widths, global pooling and a linear head"
+domain: "vision"
+parameters:
+  channels: {type: int, default: 3, range: [1, 64], help: "Input channels"}
+  size: {type: int, default: 32, range: [8, 512], help: "Image height/width"}
+  width: {type: int, default: 16, range: [4, 256], help: "Channels in the first stage"}
+  width2: {type: int, default: 32, range: [4, 512], help: "Channels in the second stage"}
+  classes: {type: int, default: 10, range: [2, 1000], help: "Number of classes"}
+graph:
+  inputs: {img: [B, "${channels}", "${size}", "${size}"]}
+  nodes:
+    stem:   {block: conv_block, params: {channels: "${width}"}}
+    r1:     {block: resnet_block, params: {channels: "${width}"}}
+    pool:   {block: maxpool2d}
+    widen:  {block: conv_block, params: {channels: "${width2}"}}
+    r2:     {block: resnet_block, params: {channels: "${width2}"}}
+    gap:    {block: global_avg_pool}
+    head:   {block: linear, params: {out: "${classes}"}}
+  edges: ["img -> stem", "stem -> r1", "r1 -> pool", "pool -> widen", "widen -> r2", "r2 -> gap", "gap -> head"]
+  outputs: {logits: head}
