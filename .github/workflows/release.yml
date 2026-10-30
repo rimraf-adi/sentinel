@@ -10,7 +10,26 @@ permissions:
   contents: write
 
 jobs:
+  build-ui:
+    name: Build React dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+          if-no-files-found: error
+
   build-wheels:
+    needs: build-ui
     name: Build wheels on ${{ matrix.os }} (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -28,6 +47,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fetch prebuilt dashboard (embedded into the binary)
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
         with:
@@ -35,6 +60,8 @@ jobs:
 
       - name: Build wheels via Maturin
         uses: PyO3/maturin-action@v1
+        env:
+          SENTINEL_SKIP_UI: "1"
         with:
           target: ${{ matrix.target }}
           args: --release --out dist -m crates/sentinel-cli/Cargo.toml

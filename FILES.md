@@ -19,7 +19,7 @@
 
 ```text
 sentinel/
-├── sentinel.lock                       # Machine-managed lockfile (tool version, templates & invariants)
+├── sentinel.lock                       # Machine-managed lockfile (tool version, components & invariants)
 ├── sentinel.yaml                       # Workspace Sentinel configuration (project name, defaults, runners)
 ├── machines.yaml                       # Machine & worker node inventory (local & remote SSH)
 ├── datasets.yaml                       # Dataset mounts & external filesystem paths inventory
@@ -27,13 +27,13 @@ sentinel/
 │   └── workflows/
 │       └── release.yml                 # CI workflow building platform wheels for 4 OS/arch targets
 ├── crates/
-│   ├── sentinel-core/                  # Core domain models, template engine, config parser & exporter
+│   ├── sentinel-core/                  # Core domain models, component engine, config parser & exporter
 │   │   ├── Cargo.toml
 │   │   ├── src/
 │   │   │   ├── lib.rs                  # Module exports for sentinel-core
 │   │   │   ├── models.rs               # Core types: JobSpec, JobRecord, HardwareStats, MetricPoint
 │   │   │   ├── config.rs               # Hydra / OmegaConf YAML hierarchy & dot-path override engine
-│   │   │   ├── templates.rs            # Declarative template schema, registry, validation & inheritance
+│   │   │   ├── components.rs            # Declarative component schema, registry, validation & inheritance
 │   │   │   ├── scaffold.rs             # Project generator for `sentinel new`
 │   │   │   ├── export.rs               # Zero lock-in pure PyTorch script generator
 │   │   │   └── storage.rs              # Storage interfaces & MLflow driver definitions
@@ -59,13 +59,12 @@ sentinel/
 │   │   ├── Cargo.toml
 │   │   ├── pyproject.toml              # Maturin build configuration for PyPI/uv wheels
 │   │   └── src/
-│   │       └── main.rs                 # CLI entry point (dev, run, sweep, template, export, new)
-│   └── sentinel-ui/                    # Lightweight Web UI & state transition controller
-│       ├── Cargo.toml
-│       └── src/
-│           ├── lib.rs                  # Module exports for sentinel-ui
-│           ├── state.rs                # Dashboard state engine (ReadOnly -> Editing -> Idle transitions)
-│           └── view.rs                 # Standalone HTML/WASM view renderer with gauges & template cards
+│   │       └── main.rs                 # CLI entry point (dev, run, sweep, component, export, new)
+├── ui/                                 # React dashboard (Vite + TypeScript + React Flow), embedded into the binary
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/                            # App.tsx, api.ts, pages/*, builder/* (drag & drop component graph)
+├── components/                         # Component library: graph components (ANN, LSTM, CNN, ...) and recipes
 ├── packages/
 │   └── sentinel-sdk/                   # Thin Python SDK with safe-tracking wrapper
 │       ├── pyproject.toml              # Hatchling package metadata for sentinel-sdk
@@ -79,12 +78,12 @@ sentinel/
 ├── recipes/
 │   ├── vision_train.py                 # Fast CPU/GPU synthetic vision training smoke test
 │   └── sweep_orchestrator.py           # Optuna ASHA dynamic hyperparameter sweep orchestrator
-├── templates/                          # Reference & starter templates
+├── components/                          # Reference & starter components
 │   ├── vision/
 │   │   └── image-classification.yaml   # Vision classification reference (ResNet/ViT, AMP, cosine LR)
 │   ├── custom/
 │   │   ├── command-runner.yaml         # Zero-touch wrapper for existing user commands (`python train.py`)
-│   │   └── starter.yaml                # Clean starter template for custom recipes
+│   │   └── starter.yaml                # Clean starter component for custom recipes
 │   ├── llm/
 │   │   └── lora-finetune.yaml          # LLM LoRA/PEFT parameter-efficient fine-tuning placeholder
 │   └── tabular/
@@ -111,7 +110,7 @@ sentinel/
 ## File-by-File Summary
 
 ### 1. Root Configuration & Documentation
-* **`Cargo.toml`**: Declares Cargo workspace members (`sentinel-core`, `sentinel-daemon`, `sentinel-agent`, `sentinel-cli`, `sentinel-ui`) and shared workspace dependencies.
+* **`Cargo.toml`**: Declares Cargo workspace members (`sentinel-core`, `sentinel-daemon`, `sentinel-agent`, `sentinel-cli`) and shared workspace dependencies.
 * **`pyproject.toml`**: Root Python project configuration declaring `package = false` so `uv` treats the repo as a workspace for recipes, tests, and tools.
 * **`uv.lock`**: Pinned lockfile for Python packages (PyTorch, torchvision, MLflow, Optuna, PyYAML).
 * **`sentinel.md`**: Master architecture document containing the locked specification, philosophy, and roadmaps.
@@ -127,14 +126,14 @@ sentinel/
 
 ---
 
-### 2. `crates/sentinel-core` (Data Models, Templates & Exporter)
+### 2. `crates/sentinel-core` (Data Models, Components & Exporter)
 * **`src/models.rs`**: Canonical domain structs: `JobSpec` (execution parameters), `JobRecord` (live status & exit codes), `JobStatus`, `RunMode` (`Command`, `Sdk`, `Framework`), `HardwareStats`, `GpuStats`, `MetricPoint`, and `MachineSpec`.
 * **`src/config.rs`**: Implements `HydraConfig` supporting hierarchical YAML composition and arbitrary dot-path overrides (e.g. `model.backbone.encoder.layers=12`).
-* **`src/templates.rs`**: Core declarative template engine. Handles YAML parsing, parameter schema validation (types, ranges, choice options), locked fields protection, template inheritance resolution (`extends:`), custom template starter creation, and freezing runs into templates.
+* **`src/components.rs`**: Core declarative component engine. Handles YAML parsing, parameter schema validation (types, ranges, choice options), locked fields protection, component inheritance resolution (`extends:`), custom component starter creation, and freezing runs into components.
 * **`src/scaffold.rs`**: `ProjectScaffolder` engine used by `sentinel new` to generate a production-ready repository with `sentinel.yaml` (human settings), `sentinel.lock` (machine state), `machines.yaml`, and folder conventions.
-* **`src/export.rs`**: `ScriptExporter` translates template specs into standalone, pure bare PyTorch scripts with zero runtime dependencies on Sentinel or Lightning.
+* **`src/export.rs`**: `ScriptExporter` translates component specs into standalone, pure bare PyTorch scripts with zero runtime dependencies on Sentinel or Lightning.
 * **`src/storage.rs`**: Storage abstractions for tracking runs in MLflow-native layout.
-* **`tests/test_edge_cases.rs`**: Integration test suite verifying 3-level template inheritance, numeric range enforcement, choice validation, locked parameter barriers, and malformed YAML handling.
+* **`tests/test_edge_cases.rs`**: Integration test suite verifying 3-level component inheritance, numeric range enforcement, choice validation, locked parameter barriers, and malformed YAML handling.
 
 ---
 
@@ -147,7 +146,7 @@ sentinel/
   * `GET /api/jobs`, `POST /api/jobs` — Job management and submission.
   * `POST /api/jobs/:id/stop` — Cancels and terminates running jobs.
   * `GET /api/hardware` — Real-time telemetry snapshot.
-  * `GET /api/templates` — Returns template catalog.
+  * `GET /api/components` — Returns component catalog.
   * `GET /ws/live` — WebSocket stream pushing live hardware telemetry.
   * `Server::downsample_series()` — High-performance server-side metric downsampler (capable of downsampling 1M points in <15ms).
 * **`tests/test_stress.rs`**: High-concurrency integration tests verifying 5 parallel jobs, 5,000-line log streaming without drop, process failure exit code capture, GPU contention recovery, and 1M-point downsampling.
@@ -164,23 +163,20 @@ sentinel/
 * **`src/main.rs`**: CLI entry point with subcommands:
   * `sentinel dev` — Starts Axum daemon and serves the web dashboard.
   * `sentinel new <name>` — Scaffolds a new project repository.
-  * `sentinel template list` — Lists built-in and user custom templates.
-  * `sentinel template new <name>` — Generates a custom template starter.
-  * `sentinel template check <path>` — Validates template YAML syntax and parameters.
+  * `sentinel component list` — Lists built-in and user custom components.
+  * `sentinel component new <name>` — Generates a custom component starter.
+  * `sentinel component check <path>` — Validates component YAML syntax and parameters.
   * `sentinel export script` — Generates a standalone bare PyTorch script.
   * `sentinel sweep <config>` — Spawns parallel Optuna ASHA hyperparameter sweeps.
 * **`pyproject.toml`**: Configures `maturin` to build platform wheels containing the compiled `sentinel` binary for PyPI/uv distribution.
 
 ---
 
-### 6. `crates/sentinel-ui` (Web Dashboard & State Engine)
-* **`src/state.rs`**: Manages dashboard mode transitions (`ReadOnly` $\to$ `Editing` $\to$ `Idle`). Features an automated idle detector that transitions to low-power `Idle` mode after 15 seconds of inactivity to shed event listeners and slow down polling.
-* **`src/view.rs`**: Standalone HTML view generator rendering a minimalist, clean black-and-white interface inspired by Vercel's Geist design system. Includes:
-  * Left sidebar navigation (`Overview`, `Runs`, `Sweeps`, `Templates`, `Datasets`, `Machines`, `Code (Read-Only)`).
-  * Recent run hero card with live status pills, duration, worker info, progress bar, and elegant empty-state handling.
-  * Git Repos / Projects overview with clean empty-state fallback when no external projects are configured.
-  * Fully interactive & editable template configurator modal and custom command runner.
-  * Strictly read-only IDE code viewer for project files and recipes with zero memory bloat.
+### 6. `ui/` (React Dashboard)
+* **Stack:** Vite + React + TypeScript; [React Flow](https://reactflow.dev) powers the component-graph canvas. `npm run build` writes `ui/dist`, which `crates/sentinel-daemon/src/assets.rs` embeds into the binary with `rust-embed`, so the shipped `sentinel` executable is self-contained. See `ui/README.md`.
+* **Pages:** Overview, Runs (live logs), Sweeps, Components (hyperparameter forms), **Builder**, Datasets, Machines (live telemetry over `/ws/live`), Code (read-only).
+* **Builder:** drag blocks from the palette, wire output ports to input ports (cycles are refused), live shape inference, undo/redo, minimap, View PyTorch, and Run. Component graphs round-trip through `/api/graph/{validate,compose,run}`.
+* **Build integration:** `crates/sentinel-daemon/build.rs` builds the UI with npm when `ui/dist` is missing or stale (skip with `SENTINEL_SKIP_UI=1`). Release CI builds it once and passes it to the per-target wheel builds.
 
 ---
 
@@ -203,17 +199,17 @@ sentinel/
 
 ---
 
-### 9. `templates/` (Reference & Starter Templates)
-* **`templates/vision/image-classification.yaml`**: Standard image classification recipe with ResNet/ViT, AMP precision, and cosine annealing scheduler.
-* **`templates/custom/command-runner.yaml`**: Zero-touch adapter wrapping legacy scripts (`python train.py`).
-* **`templates/custom/starter.yaml`**: Base template for user-defined custom recipes.
-* **`templates/llm/lora-finetune.yaml`**: Large Language Model LoRA/PEFT fine-tuning specification.
-* **`templates/tabular/mlp-classifier.yaml`**: Multi-layer perceptron tabular classification specification.
+### 9. `components/` (Reference & Starter Components)
+* **`components/vision/image-classification.yaml`**: Standard image classification recipe with ResNet/ViT, AMP precision, and cosine annealing scheduler.
+* **`components/custom/command-runner.yaml`**: Zero-touch adapter wrapping legacy scripts (`python train.py`).
+* **`components/custom/starter.yaml`**: Base component for user-defined custom recipes.
+* **`components/llm/lora-finetune.yaml`**: Large Language Model LoRA/PEFT fine-tuning specification.
+* **`components/tabular/mlp-classifier.yaml`**: Multi-layer perceptron tabular classification specification.
 
 ---
 
 ### 10. `tests/` (End-to-End Test Suite)
-* **`tests/e2e_lifecycle.sh`**: Automated shell script testing project scaffolding, template creation, validation, script export, and standalone PyTorch execution.
+* **`tests/e2e_lifecycle.sh`**: Automated shell script testing project scaffolding, component creation, validation, script export, and standalone PyTorch execution.
 
 ---
 

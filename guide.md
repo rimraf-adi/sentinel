@@ -13,9 +13,9 @@ When you (the agent) are operating within a Sentinel-powered repository, keep th
 | :--- | :--- | :--- | :--- |
 | **Rust Daemon (`sentinel-daemon`)** | Supervisor, dynamic GPU allocator, NVML telemetry, API server. | Interact via CLI (`sentinel dev`, `sentinel run`) or REST/WebSocket endpoints. | Do not rewrite training logic in Rust. Rust only manages and supervises. |
 | **Python Worker (`uv`)** | Training loop, PyTorch, MLflow tracking, Optuna sweeps. | Execute Python scripts strictly using `uv run python ...`. | Never run raw unmanaged `pip install` or `python` commands that escape the environment. |
-| **Declarative Templates (`templates/`)** | Single source of truth for experiment recipes. | Create, extend, override parameters, and validate templates with `sentinel template check`. | Do not bypass templates to hardcode unversioned flags in ad-hoc bash scripts. |
+| **Declarative Components (`components/`)** | Single source of truth for experiment recipes. | Create, extend, override parameters, and validate components with `sentinel component check`. | Do not bypass components to hardcode unversioned flags in ad-hoc bash scripts. |
 | **Storage (`mlruns/`)** | MLflow-native experiment tracking. | Read experiment results using standard MLflow or Sentinel Python SDK. | Do not create proprietary metrics formats; adhere strictly to MLflow 3.x layout. |
-| **Web Dashboard (`sentinel-ui`)** | Minimalist Vercel-style UI. | Code view in UI is **strictly read-only**; parameter forms and run controls are **editable**. | Do not attempt to add code editing inputs to the web dashboard. |
+| **Web Dashboard (`ui/`, React)** | Minimalist Vercel-style UI. | Code view in UI is **strictly read-only**; parameter forms and run controls are **editable**. | Do not attempt to add code editing inputs to the web dashboard. |
 
 ---
 
@@ -46,21 +46,21 @@ target/debug/sentinel dev &
 
 ---
 
-## 3. Working with Templates (The Core ML Workflow)
+## 3. Working with Components (The Core ML Workflow)
 
-Sentinel enforces declarative, reproducible experiments via YAML templates with inheritance (`extends:`), type validation, and locked fields.
+Sentinel enforces declarative, reproducible experiments via YAML components with inheritance (`extends:`), type validation, and locked fields.
 
-### Listing Templates
+### Listing Components
 ```bash
-sentinel template list
+sentinel component list
 # Or via API:
-curl -s http://localhost:2512/api/templates | jq .
+curl -s http://localhost:2512/api/components | jq .
 ```
 
-### Validating a Template Before Execution
+### Validating a Component Before Execution
 Always run validation before attempting to start a training run:
 ```bash
-sentinel template check templates/vision/image-classification.yaml
+sentinel component check components/vision/image-classification.yaml
 ```
 *Validation checks:*
 * Syntax correctness (YAML composition).
@@ -68,10 +68,10 @@ sentinel template check templates/vision/image-classification.yaml
 * Choice options (`value in options`).
 * Locked parameter integrity (asserts that locked settings like `tracking.backend: mlflow` have not been violated).
 
-### Creating a New Custom Recipe Template
+### Creating a New Custom Recipe Component
 When the user asks to train a new model or create a new recipe:
 ```bash
-sentinel template new my-model-recipe --extends templates/vision/image-classification.yaml
+sentinel component new my-model-recipe --extends components/vision/image-classification.yaml
 ```
 
 ---
@@ -79,12 +79,12 @@ sentinel template new my-model-recipe --extends templates/vision/image-classific
 ## 4. Launching & Supervising Training Runs
 
 ### Launching via REST API (Recommended for Agents)
-Send a `POST` request to `/api/jobs/run-template` with parameter overrides:
+Send a `POST` request to `/api/jobs/run-component` with parameter overrides:
 ```bash
-curl -X POST http://localhost:2512/api/jobs/run-template \
+curl -X POST http://localhost:2512/api/jobs/run-component \
   -H "Content-Type: application/json" \
   -d '{
-    "template_id": "vision/image-classification@v1",
+    "component_id": "vision/image-classification@v1",
     "overrides": {
       "training.lr": 0.0005,
       "training.batch_size": 32,
@@ -95,7 +95,7 @@ curl -X POST http://localhost:2512/api/jobs/run-template \
 Response returns the `JobRecord` with unique `spec.id` and worker `pid`.
 
 ### Launching Custom Scripts (Command Mode)
-For non-template arbitrary Python scripts, submit via `/api/jobs`:
+For non-component arbitrary Python scripts, submit via `/api/jobs`:
 ```bash
 curl -X POST http://localhost:2512/api/jobs \
   -H "Content-Type: application/json" \
@@ -184,7 +184,7 @@ uv run python recipes/sweep_orchestrator.py --trials 15 --max-epochs 10
 If the user requests to run training on a cluster or VM without Sentinel installed:
 ```bash
 # Export to pure bare PyTorch code
-sentinel export script --template vision/image-classification@v1 > standalone_train.py
+sentinel export script --component vision/image-classification@v1 > standalone_train.py
 
 # Verify the script runs standalone with pure torch
 uv run python standalone_train.py
@@ -198,7 +198,7 @@ Before declaring an experiment or feature task complete, verify:
 
 - [ ] **Environment Consistency:** Strictly executed via `uv run`.
 - [ ] **Daemon Health:** Verified `/api/health` returns `200 OK`.
-- [ ] **Template Validation:** Passed `sentinel template check`.
+- [ ] **Component Validation:** Passed `sentinel component check`.
 - [ ] **GPU Deallocation:** Checked `/api/hardware` to verify GPU slots were released after job completion.
 - [ ] **Log Verification:** Checked `/api/jobs/:id/logs` to ensure no uncaught Python tracebacks.
 - [ ] **MLflow Integrity:** Confirmed `mlruns/` contains valid `meta.yaml`, `params/`, and `metrics/`.
