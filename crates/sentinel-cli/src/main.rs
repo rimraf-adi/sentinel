@@ -81,7 +81,29 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Some(Commands::Dev { port }) => {
-            println!("Starting Sentinel daemon on port {port}...");
+            let supervisor = sentinel_daemon::supervisor::ProcessSupervisor::new();
+            let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(4);
+            let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(
+                sentinel_daemon::scheduler::HardwareMonitor::new(),
+            ));
+            let mut registry = TemplateRegistry::new();
+            let _ = registry.load_from_dir(Path::new("templates"));
+            let templates = std::sync::Arc::new(registry);
+
+            let state = sentinel_daemon::server::AppState {
+                supervisor,
+                gpu_pool,
+                hardware_monitor,
+                templates,
+            };
+
+            let app = sentinel_daemon::server::Server::router(state);
+            let addr = format!("0.0.0.0:{port}");
+            let listener = tokio::net::TcpListener::bind(&addr).await?;
+            println!("🚀 Sentinel Daemon active at http://localhost:{port}");
+            println!("   API health: http://localhost:{port}/api/health");
+            println!("   WebSocket telemetry: ws://localhost:{port}/ws/live");
+            axum::serve(listener, app).await?;
         }
         Some(Commands::Run { config }) => {
             println!("Launching Sentinel run with config: {config}");

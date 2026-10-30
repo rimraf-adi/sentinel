@@ -22,3 +22,5 @@ thiserror.workspace = true
 sysinfo.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+futures.workspace = true
+libc = "0.2"

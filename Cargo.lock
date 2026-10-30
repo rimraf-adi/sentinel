@@ -947,6 +947,7 @@ name = "sentinel-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "sentinel-agent",
  "sentinel-core",
@@ -981,6 +982,8 @@ dependencies = [
  "anyhow",
  "axum",
  "chrono",
+ "futures",
+ "libc",
  "sentinel-core",
  "serde",
  "serde_json",

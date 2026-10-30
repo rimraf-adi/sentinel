@@ -14,6 +14,7 @@ path = "src/main.rs"
 sentinel-core.workspace = true
 sentinel-daemon.workspace = true
 sentinel-agent.workspace = true
+axum.workspace = true
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true
