@@ -1,0 +1,15 @@
+compound: residual_mlp_block
+family: core
+description: "An MLP block with a skip connection: out = in + project(mlp(in)). Built from the compound mlp_block"
+params:
+  hidden: {default: 64, help: "Width inside the block (the skip keeps the input width)"}
+  width: {help: "Input and output features (must equal the input's last dimension)"}
+  dropout: {default: 0.0, help: "Dropout probability"}
+graph:
+  inputs: {in: [B, "${width}"]}
+  nodes:
+    mlp:  {block: mlp_block, params: {width: "${hidden}", dropout: "${dropout}"}}
+    proj: {block: linear, params: {out: "${width}"}}
+    skip: {block: add}
+  edges: ["in -> mlp", "mlp -> proj", "proj -> skip.a", "in -> skip.b"]
+  outputs: {out: skip}

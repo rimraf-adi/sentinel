@@ -20,7 +20,7 @@ fn graph(yaml: &str) -> Result<sentinel_core::graph::ValidatedGraph, GraphError>
 fn every_shipped_graph_component_validates() {
     let r = registry();
     let graphs: Vec<_> = r.list().into_iter().filter(|c| c.graph.is_some()).collect();
-    assert!(graphs.len() >= 6, "expected >= 6 graph components, got {}", graphs.len());
+    assert!(graphs.len() >= 7, "expected >= 6 graph components, got {}", graphs.len());
     for c in graphs {
         c.build_graph(&HashMap::new()).unwrap_or_else(|e| panic!("{}: {e}", c.component_id));
     }
@@ -173,6 +173,7 @@ fn block_aliases_and_catalog() {
     for b in Block::all() {
         let i = b.info();
         assert!(!i.inputs.is_empty() && !i.outputs.is_empty());
+        assert_eq!(i.tier, "fundamental");
     }
 }
 
@@ -207,6 +208,7 @@ fn generated_models_run_forward_in_pytorch() {
     let cases: &[(&str, &str)] = &[
         ("tabular/ann-classifier@v1", "m(torch.randn(5, 2)).shape == (5, 3)"),
         ("tabular/residual-mlp@v1", "m(torch.randn(5, 2)).shape == (5, 3)"),
+        ("tabular/deep-residual-mlp@v1", "m(torch.randn(5, 2)).shape == (5, 3)"),
         ("sequence/lstm-classifier@v1", "m(torch.randn(5, 2)).shape == (5, 3)"),
         ("vision/cnn-classifier@v1", "m(torch.randn(2, 3, 32, 32)).shape == (2, 10)"),
         ("sequence/transformer-classifier@v1", "m(torch.randint(0, 1000, (2, 7))).shape == (2, 2)"),

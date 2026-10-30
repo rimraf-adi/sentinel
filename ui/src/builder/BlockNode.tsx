@@ -17,8 +17,8 @@ export function BlockNodeView({ id, data, selected }: NodeProps<BN>) {
     return result.nodes[n]?.outputs[p] ?? null;
   };
   return (
-    <div className={'bnode' + (selected ? ' selected' : '') + (errorNode === id ? ' bad' : '')} style={{ ['--fam' as string]: `var(--fam-${info.family})` }}>
-      <div className="bnode-h"><b>{id}</b><span>{data.block}{data.share ? ` ⇢ ${data.share}` : ''}</span></div>
+    <div className={'bnode' + (info.tier === 'compound' ? ' compound' : '') + (selected ? ' selected' : '') + (errorNode === id ? ' bad' : '')} style={{ ['--fam' as string]: `var(--fam-${info.family})` }}>
+      <div className="bnode-h"><b>{id}</b><span>{info.tier === 'compound' ? '◆ ' : ''}{data.block}{data.share ? ` ⇢ ${data.share}` : ''}</span></div>
       <div className="bnode-b">
         <div>
           {info.inputs.map((p) => (

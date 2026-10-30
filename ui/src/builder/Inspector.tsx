@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { BlockInfo, Training } from '../api';
+import type { BlockInfo, NodeDesc, Training, ValidateOk } from '../api';
 import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
 import { Field } from '../ui';
 import { IDENT } from './convert';
@@ -14,12 +14,35 @@ function Commit({ value, onCommit, mono }: { value: string; onCommit: (v: string
 
 const parse = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
 const show = (v: unknown) => (v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+/** What a compound block is made of, recursively, with the shape on every inner node's first output. */
+function Inner({ nodes, order, depth }: { nodes: Record<string, NodeDesc>; order: string[]; depth: number }) {
+  return (
+    <>
+      {order.map((id) => {
+        const n = nodes[id];
+        const shape = Object.values(n.outputs)[0];
+        return (
+          <div key={id}>
+            <div className="inner-row" style={{ paddingLeft: depth * 14 }}>
+              <span className={'tier-dot ' + n.tier} title={n.tier} />
+              <span>{id}</span><span className="muted">{n.block}</span>
+              {shape && <span className="mono shape">[{shape.join(', ')}]</span>}
+            </div>
+            {n.inner && <Inner nodes={n.inner.nodes} order={n.inner.order} depth={depth + 1} />}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 const sel = (opts: string[], cur: string, on: (v: string) => void) => (
   <select value={cur} onChange={(e) => on(e.target.value)}>{opts.map((o) => <option key={o} value={o}>{o || '(none)'}</option>)}</select>
 );
 
 export interface InspectorProps {
   node: BNode | null;
+  result: ValidateOk | null;
   blocks: Record<string, BlockInfo>;
   siblings: BNode[];
   training: Training | null;
@@ -65,8 +88,17 @@ export function Inspector(p: InspectorProps) {
     const setParam = (k: string, v: unknown) => p.patchData(node.id, { params: { ...node.data.params, [k]: v } });
     return (
       <>
-        <h4>{node.data.block}</h4>
+        <h4>{node.data.block} <span className={'tier-tag ' + (b?.tier ?? '')}>{b?.tier}</span></h4>
         <p className="hint">{b?.description}</p>
+        {b?.tier === 'compound' && (
+          <div className="inner">
+            <div className="stat-title">Built from</div>
+            <div className="chips" style={{ margin: '6px 0 8px' }}>{b.uses.map((u) => <span className="chip" key={u}>{u}</span>)}</div>
+            {p.result?.nodes[node.id]?.inner
+              ? <Inner nodes={p.result.nodes[node.id].inner!.nodes} order={p.result.nodes[node.id].inner!.order} depth={0} />
+              : <p className="hint">Connect inputs and fix any errors to see the inner graph with live shapes.</p>}
+          </div>
+        )}
         <Field label="Node id"><Commit value={node.id} onCommit={(v) => p.rename(node.id, v)} /></Field>
         {b?.params.map((bp) => {
           const v = node.data.params[bp.name] !== undefined ? node.data.params[bp.name] : bp.default;

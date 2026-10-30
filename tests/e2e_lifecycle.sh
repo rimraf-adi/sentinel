@@ -66,7 +66,27 @@ PY
 grep -q "nn.LSTM" lstm.py || { echo "❌ compose did not emit an LSTM"; exit 1; }
 if "$SENTINEL_BIN" run tabular/ann-classifier@v1 --set nope=1 >/dev/null 2>&1; then echo "❌ unknown hyperparameter was accepted"; exit 1; fi
 
+"$SENTINEL_BIN" component blocks | grep -q "COMPOUND BLOCKS" || { echo "❌ block catalog has no compound tier"; exit 1; }
+"$SENTINEL_BIN" component show tabular/deep-residual-mlp@v1 | grep -q "mlp_block (compound)" || { echo "❌ compound blocks were not expanded"; exit 1; }
+mkdir -p blocks/core
+cat > blocks/core/twice.yaml <<'YAML'
+compound: twice
+family: core
+description: two linear layers (a project-defined compound block)
+params: {width: {default: 8}}
+graph:
+  inputs: {in: [B, F]}
+  nodes: {a: {block: linear, params: {out: "${width}"}}, b: {block: linear, params: {out: "${width}"}}}
+  edges: ["in -> a", "a -> b"]
+  outputs: {out: b}
+YAML
+"$SENTINEL_BIN" component blocks | grep -q "twice" || { echo "❌ project compound block not loaded from ./blocks"; exit 1; }
+
 if python3 -c "import torch" 2>/dev/null; then
+  OUT=$("$SENTINEL_BIN" run tabular/deep-residual-mlp@v1 --set epochs=60)
+  echo "$OUT" | grep -q "test_acc" || { echo "❌ compound-block model did not train"; exit 1; }
+  grep -q "class ResidualMlpBlock" .sentinel/generated/tabular_deep_residual_mlp_v1-*.py || { echo "❌ no nested compound class in generated code"; exit 1; }
+  echo "✅ Model built from compound blocks trained (nested classes generated)."
   OUT=$("$SENTINEL_BIN" run tabular/ann-classifier@v1 --set epochs=120)
   echo "$OUT" | tail -2
   ACC=$(echo "$OUT" | grep test_acc | tail -1 | awk '{print $NF}')

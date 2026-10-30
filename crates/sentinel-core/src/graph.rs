@@ -1,7 +1,7 @@
 //! Component graphs: a DAG of typed blocks with named ports, symbolic shape inference,
 //! validation, and the data structures shared by codegen, CLI, daemon, and UI.
 
-use crate::blocks::Block;
+use crate::compound::{BlockKind, BlockLibrary};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -30,6 +30,8 @@ pub enum GraphError {
     BadOutput { name: String, msg: String },
     #[error("node '{node}': cannot share weights with '{target}': {msg}")]
     BadShare { node: String, target: String, msg: String },
+    #[error("in compound block '{compound}' (node '{node}'): {msg}")]
+    Compound { node: String, compound: String, msg: String },
     #[error("graph has no nodes")]
     Empty,
     #[error("training spec: {0}")]
@@ -68,7 +70,7 @@ pub struct NodeSpec {
     #[serde(default)]
     pub params: Params,
     /// Reuse the module (weights) of another node of the same block.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub share: Option<String>,
 }
 
@@ -136,7 +138,7 @@ pub struct GraphSpec {
     pub nodes: BTreeMap<String, NodeSpec>,
     pub edges: Vec<String>,
     pub outputs: BTreeMap<String, String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub training: Option<TrainingSpec>,
 }
 
@@ -161,6 +163,10 @@ impl Source {
 #[derive(Debug, Clone)]
 pub struct ValidatedGraph {
     pub spec: GraphSpec,
+    /// Resolved block (either tier) per node.
+    pub kinds: BTreeMap<String, BlockKind>,
+    /// For compound nodes: the validated inner graph, used to emit a nested module class.
+    pub compounds: BTreeMap<String, Box<ValidatedGraph>>,
     /// Topological execution order.
     pub order: Vec<String>,
     /// Fully resolved (defaults filled) parameters per node.
@@ -174,8 +180,8 @@ pub struct ValidatedGraph {
 }
 
 impl ValidatedGraph {
-    pub fn block(&self, node: &str) -> Block {
-        Block::parse(&self.spec.nodes[node].block).expect("validated")
+    pub fn kind(&self, node: &str) -> &BlockKind {
+        &self.kinds[node]
     }
 
     pub fn shape_of(&self, s: &Source) -> &Shape {
@@ -192,16 +198,26 @@ impl GraphSpec {
         serde_yaml::from_value(v).map_err(|e| GraphError::Parse(e.to_string()))
     }
 
+    /// Validate against the process-wide block library (shipped compounds plus the project's `./blocks`).
     pub fn validate(&self) -> Result<ValidatedGraph, GraphError> {
+        self.validate_with(&BlockLibrary::global())
+    }
+
+    pub fn validate_with(&self, lib: &BlockLibrary) -> Result<ValidatedGraph, GraphError> {
+        self.validate_stack(lib, &[])
+    }
+
+    /// `stack` holds the compound blocks currently being expanded, to reject a block that contains itself.
+    pub fn validate_stack(&self, lib: &BlockLibrary, stack: &[String]) -> Result<ValidatedGraph, GraphError> {
         if self.nodes.is_empty() {
             return Err(GraphError::Empty);
         }
 
         // 1. blocks + resolved params
-        let mut blocks: BTreeMap<&str, Block> = BTreeMap::new();
+        let mut blocks: BTreeMap<&str, BlockKind> = BTreeMap::new();
         let mut params: BTreeMap<String, Params> = BTreeMap::new();
         for (name, n) in &self.nodes {
-            let b = Block::parse(&n.block).ok_or_else(|| GraphError::UnknownBlock {
+            let b = lib.resolve(&n.block).ok_or_else(|| GraphError::UnknownBlock {
                 node: name.clone(),
                 block: n.block.clone(),
             })?;
@@ -269,17 +285,21 @@ impl GraphSpec {
 
         // 4. shape inference
         let mut shapes: BTreeMap<String, Shape> = BTreeMap::new();
+        let mut compounds: BTreeMap<String, Box<ValidatedGraph>> = BTreeMap::new();
         for (name, shp) in &self.inputs {
             shapes.insert(name.clone(), shp.clone());
         }
         for node in &order {
-            let b = blocks[node.as_str()];
+            let b = &blocks[node.as_str()];
             let mut ins: BTreeMap<String, Shape> = BTreeMap::new();
             for p in b.inputs() {
                 let src = &wires[&(node.clone(), p.to_string())];
                 ins.insert(p.to_string(), shapes[&src.key()].clone());
             }
-            let outs = b.infer(node, &params[node], &ins)?;
+            let (outs, inner) = b.infer(node, &params[node], &ins, lib, stack)?;
+            if let Some(inner) = inner {
+                compounds.insert(node.clone(), inner);
+            }
             for (port, s) in outs {
                 shapes.insert(format!("{node}.{port}"), s);
             }
@@ -309,11 +329,11 @@ impl GraphSpec {
                     ins_a.insert(p.to_string(), shapes[&wires[&(name.clone(), p.to_string())].key()].clone());
                     ins_b.insert(p.to_string(), shapes[&wires[&(target.clone(), p.to_string())].key()].clone());
                 }
-                let b = blocks[name.as_str()];
-                if b.ctor(name, &params[name], &ins_a) != b.ctor(target, &params[target], &ins_b) {
+                let b = &blocks[name.as_str()];
+                if b.instance_key(name, &params[name], &ins_a) != b.instance_key(target, &params[target], &ins_b) {
                     return Err(err("input shapes imply different module configurations"));
                 }
-                if b.ctor(name, &params[name], &ins_a).is_none() {
+                if b.instance_key(name, &params[name], &ins_a).is_none() {
                     return Err(err("block has no weights to share"));
                 }
             }
@@ -331,13 +351,14 @@ impl GraphSpec {
             outputs.insert(oname.clone(), src);
         }
 
-        Ok(ValidatedGraph { spec: self.clone(), order, params, wires, shapes, outputs })
+        let kinds = blocks.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        Ok(ValidatedGraph { spec: self.clone(), kinds, compounds, order, params, wires, shapes, outputs })
     }
 
-    fn parse_source(&self, s: &str, blocks: &BTreeMap<&str, Block>) -> Result<Source, String> {
+    fn parse_source(&self, s: &str, blocks: &BTreeMap<&str, BlockKind>) -> Result<Source, String> {
         if let Some((n, p)) = s.split_once('.') {
             let b = blocks.get(n).ok_or_else(|| format!("unknown node '{n}'"))?;
-            if !b.outputs().contains(&p) {
+            if !b.outputs().iter().any(|o| o == p) {
                 return Err(format!("block '{}' has no output port '{p}' (outputs: {:?})", b.name(), b.outputs()));
             }
             return Ok(Source::Port { node: n.into(), port: p.into() });
@@ -346,24 +367,24 @@ impl GraphSpec {
             return Ok(Source::Input { name: s.into() });
         }
         let b = blocks.get(s).ok_or_else(|| format!("'{s}' is neither a graph input nor a node"))?;
-        match b.outputs() {
-            [only] => Ok(Source::Port { node: s.into(), port: (*only).into() }),
+        match b.outputs().as_slice() {
+            [only] => Ok(Source::Port { node: s.into(), port: only.clone() }),
             many => Err(format!("node '{s}' has several outputs {many:?}; name one as '{s}.<port>'")),
         }
     }
 }
 
-fn parse_dst(s: &str, blocks: &BTreeMap<&str, Block>) -> Result<(String, String), String> {
+fn parse_dst(s: &str, blocks: &BTreeMap<&str, BlockKind>) -> Result<(String, String), String> {
     if let Some((n, p)) = s.split_once('.') {
         let b = blocks.get(n).ok_or_else(|| format!("unknown node '{n}'"))?;
-        if !b.inputs().contains(&p) {
+        if !b.inputs().iter().any(|i| i == p) {
             return Err(format!("block '{}' has no input port '{p}' (inputs: {:?})", b.name(), b.inputs()));
         }
         return Ok((n.into(), p.into()));
     }
     let b = blocks.get(s).ok_or_else(|| format!("unknown node '{s}'"))?;
-    match b.inputs() {
-        [only] => Ok((s.into(), (*only).into())),
+    match b.inputs().as_slice() {
+        [only] => Ok((s.into(), only.clone())),
         many => Err(format!("node '{s}' has several inputs {many:?}; name one as '{s}.<port>'")),
     }
 }

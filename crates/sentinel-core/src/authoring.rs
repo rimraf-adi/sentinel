@@ -2,6 +2,7 @@
 //! sweepable hyperparameters (`${name}` placeholders plus a `parameters:` entry).
 
 use crate::components::{Component, ComponentError, ParamSpec, ParamType};
+use crate::compound::{BlockLibrary, CompoundDef};
 use crate::graph::GraphSpec;
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -132,6 +133,95 @@ pub fn build_component_yaml(spec: &SaveSpec) -> Result<(String, String), Compone
     Ok((component_id, yaml))
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SaveBlockSpec {
+    pub name: String,
+    pub family: String,
+    #[serde(default)]
+    pub description: String,
+    pub graph: GraphSpec,
+    #[serde(default)]
+    pub expose: Vec<ExposeParam>,
+}
+
+/// `My Block!` -> `my_block`
+pub fn snake(s: &str) -> String {
+    slugify(s).replace('-', "_")
+}
+
+/// Turn a drawn graph into a compound block: graph inputs and outputs become ports, exposed parameters become
+/// the block's parameters. Returns `(block_name, yaml)`; the YAML is proven by instantiating it once.
+pub fn build_compound_yaml(spec: &SaveBlockSpec, lib: &BlockLibrary) -> Result<(String, String), ComponentError> {
+    let name = snake(&spec.name);
+    let family = snake(&spec.family);
+    if name.is_empty() || family.is_empty() {
+        return Err(err("name and family must contain letters or digits"));
+    }
+    if !name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_') {
+        return Err(err("a block name must start with a letter"));
+    }
+    if spec.graph.inputs.is_empty() {
+        return Err(err("a compound block needs at least one graph input (they become its input ports)"));
+    }
+    let mut graph_spec = spec.graph.clone();
+    graph_spec.training = None; // a block is a piece of a model, not a training recipe
+    let validated = graph_spec.validate_with(lib).map_err(|e| err(format!("graph is not valid: {e}")))?;
+
+    let mut graph = serde_yaml::to_value(&graph_spec).map_err(|e| err(e.to_string()))?;
+    if let Some(m) = graph.as_mapping_mut() {
+        m.remove("training");
+    }
+    let mut params = serde_yaml::Mapping::new();
+    for ex in &spec.expose {
+        if !is_ident(&ex.name) || !ex.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+            return Err(err(format!("'{}' is not a valid block parameter name (lowercase letters, digits, underscores)", ex.name)));
+        }
+        let resolved = validated
+            .params
+            .get(&ex.node)
+            .and_then(|p| p.get(&ex.param))
+            .ok_or_else(|| err(format!("node '{}' has no parameter '{}'", ex.node, ex.param)))?;
+        if !matches!(resolved, Value::Bool(_) | Value::Number(_) | Value::String(_)) {
+            return Err(err(format!("only scalar values can become block parameters, got {resolved:?}")));
+        }
+        match params.get(&Value::String(ex.name.clone())) {
+            Some(existing) => {
+                if existing.get("default") != Some(resolved) {
+                    return Err(err(format!("'{}' ties parameters that currently differ; set them equal first", ex.name)));
+                }
+            }
+            None => {
+                let mut decl = serde_yaml::Mapping::new();
+                decl.insert("default".into(), resolved.clone());
+                decl.insert("help".into(), format!("{}.{}", ex.node, ex.param).into());
+                params.insert(ex.name.clone().into(), Value::Mapping(decl));
+            }
+        }
+        graph["nodes"][ex.node.as_str()]["params"][ex.param.as_str()] = Value::String(format!("${{{}}}", ex.name));
+    }
+
+    let mut doc = serde_yaml::Mapping::new();
+    doc.insert("compound".into(), name.clone().into());
+    doc.insert("family".into(), family.into());
+    doc.insert("description".into(), if spec.description.trim().is_empty() { format!("Custom block {}", spec.name.trim()) } else { spec.description.trim().to_string() }.into());
+    doc.insert("params".into(), Value::Mapping(params));
+    doc.insert("graph".into(), graph);
+    let yaml = serde_yaml::to_string(&Value::Mapping(doc)).map_err(|e| err(e.to_string()))?;
+
+    // Prove it: it parses, and instantiates with its own defaults and declared input shapes.
+    let def = CompoundDef::from_yaml(&yaml).map_err(err)?;
+    let mut probe = lib.clone();
+    probe.insert(def.clone()).map_err(err)?;
+    let kind = probe.resolve(&name).expect("just inserted");
+    let defaults = kind.resolve_params("probe", &Default::default()).map_err(|e| err(e.to_string()))?;
+    let mut ins = std::collections::BTreeMap::new();
+    for (k, v) in &spec.graph.inputs {
+        ins.insert(k.clone(), v.clone());
+    }
+    def.instantiate("probe", &defaults, &ins, &probe, &[]).map_err(|e| err(format!("saved block does not instantiate: {e}")))?;
+    Ok((name, yaml))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +331,57 @@ expose: [{node: e, param: out, name: width}, {node: f, param: out, name: width}]
     fn slugs() {
         assert_eq!(slugify("  My  Net!! v2 "), "my-net-v2");
         assert_eq!(slugify("***"), "");
+    }
+
+    fn block_spec(expose: &str) -> SaveBlockSpec {
+        let y = format!(
+            r#"
+name: My Gate
+family: core
+graph:
+  inputs: {{x: [B, 8]}}
+  nodes:
+    a: {{block: linear, params: {{out: 8}}}}
+    r: {{block: activation, params: {{kind: relu}}}}
+    s: {{block: add}}
+  edges: ['x -> a', 'a -> r', 'r -> s.a', 'x -> s.b']
+  outputs: {{y: s}}
+  training: {{loss: mse, data: {{csv: d.csv, features: [x1], target: y}}}}
+expose: {expose}
+"#
+        );
+        serde_yaml::from_str(&y).unwrap()
+    }
+
+    #[test]
+    fn a_drawn_graph_becomes_a_usable_compound_block() {
+        let lib = BlockLibrary::builtin();
+        let (name, yaml) = build_compound_yaml(&block_spec("[{node: a, param: out, name: width}]"), &lib).unwrap();
+        assert_eq!(name, "my_gate");
+        assert!(!yaml.contains("training"), "a block carries no training recipe");
+        let mut lib2 = lib.clone();
+        lib2.insert(CompoundDef::from_yaml(&yaml).unwrap()).unwrap();
+        // use it inside a bigger graph at a different width: x [B, 8] keeps the skip valid only when width == 8
+        let g = GraphSpec::from_yaml("inputs: {i: [B, 8]}\nnodes: {g: {block: my_gate, params: {width: 8}}}\nedges: ['i -> g']\noutputs: {o: g}").unwrap().validate_with(&lib2).unwrap();
+        assert_eq!(crate::graph::fmt_shape(&g.shapes["g.y"]), "[B, 8]");
+        let bad = GraphSpec::from_yaml("inputs: {i: [B, 8]}\nnodes: {g: {block: my_gate, params: {width: 4}}}\nedges: ['i -> g']\noutputs: {o: g}").unwrap().validate_with(&lib2);
+        assert!(bad.unwrap_err().to_string().contains("my_gate"), "the skip needs width 8");
+    }
+
+    #[test]
+    fn compound_authoring_rejects_bad_requests() {
+        let lib = BlockLibrary::builtin();
+        let mut s = block_spec("[]");
+        s.name = "linear".into();
+        // collides with a fundamental block: caught when the definition is parsed
+        assert!(build_compound_yaml(&s, &lib).unwrap_err().to_string().contains("fundamental"));
+        let mut s = block_spec("[]");
+        s.name = "mlp_block".into();
+        assert!(build_compound_yaml(&s, &lib).unwrap_err().to_string().contains("already exists"));
+        let mut s = block_spec("[]");
+        s.graph.inputs.clear();
+        assert!(build_compound_yaml(&s, &lib).is_err());
+        assert!(build_compound_yaml(&block_spec("[{node: a, param: out, name: Bad}]"), &lib).unwrap_err().to_string().contains("valid block parameter name"));
+        assert!(build_compound_yaml(&block_spec("[{node: zzz, param: out, name: w}]"), &lib).unwrap_err().to_string().contains("no parameter"));
     }
 }

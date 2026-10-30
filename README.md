@@ -62,6 +62,41 @@ Sentinel addresses these structural bottlenecks through an asynchronous, bifurca
 ---
 
 
+## Block hierarchy
+
+Models are built from blocks in two tiers, so common structures are defined once and reused.
+
+| Tier | What it is | Lives in |
+|---|---|---|
+| **Fundamental** | A native block: one PyTorch layer (`linear`, `conv2d`, `lstm`, `attention`, `add`, ...). | the Rust catalog (`sentinel component blocks`) |
+| **Compound** | A reusable subgraph of fundamental blocks *or other compound blocks*, with its own ports and hyperparameters (`resnet_block`, `residual_mlp_block`, ...). | `blocks/<family>/<name>.yaml` (shipped ones are embedded in the binary) |
+| **Model** | A whole graph using blocks from either tier, with a training recipe. | `components/` |
+
+```yaml
+# blocks/core/residual_mlp_block.yaml: built from the compound mlp_block
+compound: residual_mlp_block
+params:
+  hidden: {default: 64}
+  width:  {}                  # no default = required
+graph:
+  inputs: {in: [B, "${width}"]}
+  nodes:
+    mlp:  {block: mlp_block, params: {width: "${hidden}"}}
+    proj: {block: linear, params: {out: "${width}"}}
+    skip: {block: add}
+  edges: ["in -> mlp", "mlp -> proj", "proj -> skip.a", "in -> skip.b"]
+  outputs: {out: skip}
+```
+
+- A compound block's input shapes come from whatever is wired to it, so one definition works at any size; errors name every
+  compound on the path (`in compound block 'residual_mlp_block' (node 'r1'): ...`).
+- Compounds compile to **nested PyTorch classes** (one per distinct configuration, dependencies first), so exported code reads like
+  hand-written modules. Weight sharing, multi-output ports and keyword port names (`in`) all work.
+- A compound block can never contain itself, directly or through other blocks.
+- In the Builder, the palette has a **Fundamental / Compound** switch, compound nodes show what they are built from (recursively,
+  with live shapes), and **Save as -> Compound block** turns the canvas into a new palette block.
+- `sentinel component show <model>` prints the whole tree; `sentinel component blocks` lists both tiers.
+
 ## Footprint
 
 Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with

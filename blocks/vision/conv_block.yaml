@@ -1,0 +1,16 @@
+compound: conv_block
+family: vision
+description: "Conv2d, batch norm and activation"
+params:
+  channels: {help: "Output channels"}
+  kernel: {default: 3, help: "Kernel size"}
+  padding: {default: 1, help: "Zero padding"}
+  activation: {default: relu, help: "relu | gelu | silu | leaky_relu"}
+graph:
+  inputs: {in: [B, C, H, W]}
+  nodes:
+    conv: {block: conv2d, params: {out_channels: "${channels}", kernel: "${kernel}", padding: "${padding}"}}
+    bn:   {block: batchnorm}
+    act:  {block: activation, params: {kind: "${activation}"}}
+  edges: ["in -> conv", "conv -> bn", "bn -> act"]
+  outputs: {out: act}

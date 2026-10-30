@@ -13,9 +13,9 @@ import { SaveModal } from './SaveModal';
 import type { BNode, Graph } from './types';
 
 const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#a78bfa', vision: '#f472b6', graph: '#22d3ee' };
-const famColor = (f?: string) => (f && FAM_COLOR[f]) || '#555';
+const famColor = (f?: string) => (f && FAM_COLOR[f]) || '#94a3b8';
 const nodeTypes = { block: BlockNodeView, input: InputNodeView, output: OutputNodeView };
-const FAMILIES = ['core', 'shape', 'sequence', 'attention', 'vision', 'graph'];
+const FAMILY_ORDER = ['core', 'shape', 'sequence', 'attention', 'vision', 'graph'];
 const edgeId = (e: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null }) =>
   `${e.source}.${e.sourceHandle}->${e.target}.${e.targetHandle}`;
 
@@ -43,6 +43,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
   const [code, setCode] = useState<{ title: string; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [find, setFind] = useState('');
+  const [tier, setTier] = useState<'fundamental' | 'compound'>('fundamental');
 
   /* ---------- history ---------- */
   const past = useRef<Graph[]>([]);
@@ -71,11 +72,12 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
     return () => window.removeEventListener('keydown', on);
   }, [undo, redo]);
 
+  const refreshBlocks = useCallback(() => { api.blocks().then((l) => setBlocks(Object.fromEntries(l.map((b) => [b.name, b])))).catch((e: Error) => toast(e.message, true)); }, [toast]);
   const refreshReady = useCallback(() => { api.components().then((c) => setReady(c.filter((x) => x.graph))).catch(() => {}); }, []);
 
   /* ---------- load catalogs ---------- */
   useEffect(() => {
-    api.blocks().then((l) => setBlocks(Object.fromEntries(l.map((b) => [b.name, b])))).catch((e: Error) => toast(e.message, true));
+    refreshBlocks();
     refreshReady();
   }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -272,23 +274,33 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
       </div>
       <div className="bd-main">
         <div className="bd-side">
+          <div className="tier-tabs" role="tablist" aria-label="Block tier">
+            {(['fundamental', 'compound'] as const).map((t) => (
+              <button key={t} role="tab" aria-selected={tier === t} className={tier === t ? 'on' : ''} onClick={() => setTier(t)}>
+                {t === 'fundamental' ? 'Fundamental' : 'Compound'} <span className="mono">{Object.values(blocks).filter((b) => b.tier === t).length}</span>
+              </button>
+            ))}
+          </div>
+          <p className="hint" style={{ marginTop: 8 }}>{tier === 'fundamental' ? 'Native blocks: one PyTorch layer each.' : 'Reusable subgraphs built from the blocks below them. Save your own from the canvas.'}</p>
           <input className="input" type="search" placeholder="Search blocks…" aria-label="Search blocks" value={find} onChange={(e) => setFind(e.target.value)} style={{ width: '100%', minWidth: 0, marginBottom: 10 }} />
-          {FAMILIES.map((f) => {
-            const items = Object.values(blocks).filter((b) => b.family === f && `${b.name} ${b.description}`.toLowerCase().includes(find.toLowerCase()));
+          {[...new Set([...FAMILY_ORDER, ...Object.values(blocks).map((b) => b.family)])].map((f) => {
+            const items = Object.values(blocks).filter((b) => b.tier === tier && b.family === f && `${b.name} ${b.description}`.toLowerCase().includes(find.toLowerCase()));
             if (!items.length) return null;
             return (
-              <div key={f} style={{ ['--fam' as string]: `var(--fam-${f})` }}>
+              <div key={f} style={{ ['--fam' as string]: `var(--fam-${f}, var(--fam-core))` }}>
                 <div className="bd-fam">{f}</div>
                 {items.map((b) => (
                   <div key={b.name} className="bd-pal" draggable title="Drag onto the canvas, or double-click"
                     onDragStart={(e) => e.dataTransfer.setData('application/sentinel-block', b.name)}
                     onDoubleClick={() => addBlock(b.name, nextPos(g.nodes))}>
-                    {b.name}<small>{b.description}</small>
+                    {b.tier === 'compound' && '◆ '}{b.name}<small>{b.description}</small>
+                    {b.uses.length > 0 && <small className="uses">built from {b.uses.join(' · ')}</small>}
                   </div>
                 ))}
               </div>
             );
           })}
+          {tier === 'compound' && Object.values(blocks).every((b) => b.tier !== 'compound') && <p className="hint">No compound blocks yet.</p>}
         </div>
         <div className="bd-canvas">
           <ReactFlow
@@ -312,13 +324,14 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
           </ReactFlow>
         </div>
         <div className="bd-side">
-          <Inspector node={selected} blocks={blocks} siblings={g.nodes} training={g.training}
+          <Inspector node={selected} result={result} blocks={blocks} siblings={g.nodes} training={g.training}
             setTraining={(t) => apply((p) => ({ ...p, training: t }), true)} patchData={patchData} rename={rename} remove={removeSelected} applyDataset={applyDataset} />
         </div>
       </div>
       {saving && result && (
         <SaveModal spec={toSpec(g)} result={result} blocks={blocks} domains={[...new Set(ready.map((c) => c.domain))].sort()}
-          onClose={() => setSaving(false)} onSaved={refreshReady} />
+          families={[...new Set([...FAMILY_ORDER, ...Object.values(blocks).map((b) => b.family)])]}
+          onClose={() => setSaving(false)} onSaved={refreshReady} onSavedBlock={refreshBlocks} />
       )}
       {code && (
         <Modal wide title={code.title} onClose={() => setCode(null)}>

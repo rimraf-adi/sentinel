@@ -1,0 +1,38 @@
+schema_version: "1.0"
+component_id: "tabular/deep-residual-mlp@v1"
+name: "Deep Residual MLP"
+description: "A stem, three residual_mlp_block compounds and a head: the block hierarchy in one model (fundamental, then compound, then model)"
+domain: "tabular"
+parameters:
+  features: {type: int, default: 2, range: [1, 4096], help: "Input feature count"}
+  classes: {type: int, default: 3, range: [1, 1000], help: "Output size: number of classes, or 1 for regression"}
+  width: {type: int, default: 32, range: [2, 1024], help: "Width carried through the residual blocks"}
+  hidden: {type: int, default: 64, range: [2, 2048], help: "Width inside each residual block"}
+  dropout: {type: float, default: 0.0, range: [0.0, 0.9], help: "Dropout inside each block"}
+  lr: {type: float, default: 0.005, range: [0.00001, 0.5], help: "Learning rate"}
+  epochs: {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
+  csv: {type: string, default: "data/demo.csv", help: "Training CSV"}
+  feature_cols: {type: string, default: "x1,x2", help: "Comma-separated feature columns (numeric)"}
+  loss: {type: choice, default: "cross_entropy", options: ["cross_entropy", "mse", "bce_logits"], help: "cross_entropy for classes, mse for regression"}
+  target: {type: string, default: "label", help: "Target column"}
+graph:
+  inputs: {x: [B, "${features}"]}
+  nodes:
+    stem: {block: linear, params: {out: "${width}"}}
+    r1:   {block: residual_mlp_block, params: {width: "${width}", hidden: "${hidden}", dropout: "${dropout}"}}
+    r2:   {block: residual_mlp_block, params: {width: "${width}", hidden: "${hidden}", dropout: "${dropout}"}}
+    r3:   {block: residual_mlp_block, params: {width: "${width}", hidden: "${hidden}", dropout: "${dropout}"}}
+    head: {block: linear, params: {out: "${classes}"}}
+  edges:
+    - x -> stem
+    - stem -> r1
+    - r1 -> r2
+    - r2 -> r3
+    - r3 -> head
+  outputs: {logits: head}
+  training:
+    loss: "${loss}"
+    optimizer: adam
+    lr: "${lr}"
+    epochs: "${epochs}"
+    data: {csv: "${csv}", features: "${feature_cols}", target: "${target}"}

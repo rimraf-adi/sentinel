@@ -317,6 +317,7 @@ smoke_test:
         const SHIPPED: &[&str] = &[
             include_str!("../../../components/tabular/ann-classifier.yaml"),
             include_str!("../../../components/tabular/residual-mlp.yaml"),
+            include_str!("../../../components/tabular/deep-residual-mlp.yaml"),
             include_str!("../../../components/sequence/lstm-classifier.yaml"),
             include_str!("../../../components/sequence/transformer-classifier.yaml"),
             include_str!("../../../components/vision/cnn-classifier.yaml"),

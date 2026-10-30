@@ -131,7 +131,11 @@ export interface BlockParam {
 }
 export interface BlockInfo {
   name: string;
+  /** fundamental: native, one PyTorch module. compound: a subgraph of other blocks. */
+  tier: 'fundamental' | 'compound';
   family: string;
+  uses: string[];
+  definition: unknown | null;
   description: string;
   inputs: string[];
   outputs: string[];
@@ -153,12 +157,20 @@ export interface Training {
   batch_size?: number | null;
   data: { csv: string; features: string[]; target: string; reshape?: number[] | null; test_split?: number; seed?: number };
 }
+export interface NodeDesc {
+  block: string;
+  tier: 'fundamental' | 'compound';
+  inputs: Record<string, string>;
+  outputs: Record<string, Shape>;
+  /** Compound nodes: the same description of their inner graph. */
+  inner?: { order: string[]; nodes: Record<string, NodeDesc> };
+}
 export interface ValidateOk {
   ok: true;
   id: string;
   order: string[];
   inputs: Record<string, Shape>;
-  nodes: Record<string, { block: string; inputs: Record<string, string>; outputs: Record<string, Shape> }>;
+  nodes: Record<string, NodeDesc>;
   outputs: Record<string, string>;
   trainable: boolean;
   spec: GraphSpec;
@@ -222,6 +234,8 @@ export const api = {
   schemaOfDataset: (name: string) => req<CsvSchema>(`/api/datasets/${encodeURIComponent(name)}/schema`),
   schemaOfPath: (path: string) => req<CsvSchema>(`/api/schema?path=${encodeURIComponent(path)}`),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
+  saveBlock: (b: { name: string; family: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
+    post<{ ok: true; name: string; path: string }>('/api/blocks/save', b),
   validate: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) =>
     post<ValidateOk | ApiErr>('/api/graph/validate', b).catch((e: Error) => ({ ok: false, error: e.message }) as ApiErr),
   compose: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown>; model_only?: boolean }) =>

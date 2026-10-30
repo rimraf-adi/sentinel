@@ -1,0 +1,15 @@
+compound: mlp_block
+family: core
+description: "Linear, activation and dropout: the standard hidden layer of an MLP"
+params:
+  width: {default: 64, help: "Output features"}
+  activation: {default: relu, help: "relu | gelu | tanh | sigmoid | silu | leaky_relu"}
+  dropout: {default: 0.0, help: "Dropout probability"}
+graph:
+  inputs: {in: [B, F]}
+  nodes:
+    fc:   {block: linear, params: {out: "${width}"}}
+    act:  {block: activation, params: {kind: "${activation}"}}
+    drop: {block: dropout, params: {p: "${dropout}"}}
+  edges: ["in -> fc", "fc -> act", "act -> drop"]
+  outputs: {out: drop}

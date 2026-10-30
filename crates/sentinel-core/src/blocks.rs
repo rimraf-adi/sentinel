@@ -57,20 +57,26 @@ type ParamDef = (&'static str, &'static str, &'static str);
 
 #[derive(Serialize)]
 pub struct ParamInfo {
-    pub name: &'static str,
+    pub name: String,
     pub required: bool,
     pub default: Option<serde_json::Value>,
-    pub help: &'static str,
+    pub help: String,
 }
 
 #[derive(Serialize)]
 pub struct BlockInfo {
-    pub name: &'static str,
-    pub family: &'static str,
-    pub description: &'static str,
-    pub inputs: Vec<&'static str>,
-    pub outputs: Vec<&'static str>,
+    pub name: String,
+    /// `fundamental` (native) or `compound` (a subgraph of other blocks)
+    pub tier: &'static str,
+    pub family: String,
+    pub description: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
     pub params: Vec<ParamInfo>,
+    /// Compound blocks: the blocks this one is built from.
+    pub uses: Vec<String>,
+    /// Compound blocks: the raw graph definition, for display.
+    pub definition: Option<serde_json::Value>,
 }
 
 fn bad(node: &str, param: &str, msg: impl Into<String>) -> GraphError {
@@ -255,21 +261,24 @@ impl Block {
 
     pub fn info(&self) -> BlockInfo {
         BlockInfo {
-            name: self.name(),
-            family: self.family(),
-            description: self.description(),
-            inputs: self.inputs().to_vec(),
-            outputs: self.outputs().to_vec(),
+            name: self.name().into(),
+            tier: "fundamental",
+            family: self.family().into(),
+            description: self.description().into(),
+            inputs: self.inputs().iter().map(|s| s.to_string()).collect(),
+            outputs: self.outputs().iter().map(|s| s.to_string()).collect(),
             params: self
                 .param_defs()
                 .iter()
                 .map(|(n, d, h)| ParamInfo {
-                    name: n,
+                    name: n.to_string(),
                     required: d.is_empty(),
                     default: if d.is_empty() { None } else { serde_json::from_str(d).ok() },
-                    help: h,
+                    help: h.to_string(),
                 })
                 .collect(),
+            uses: vec![],
+            definition: None,
         }
     }
 

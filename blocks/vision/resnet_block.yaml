@@ -1,0 +1,13 @@
+compound: resnet_block
+family: vision
+description: "Two conv_blocks with an identity skip connection. Built from the compound conv_block"
+params:
+  channels: {help: "Channels in and out (must equal the input's channels)"}
+graph:
+  inputs: {in: [B, "${channels}", H, W]}
+  nodes:
+    c1:   {block: conv_block, params: {channels: "${channels}"}}
+    c2:   {block: conv_block, params: {channels: "${channels}", activation: relu}}
+    skip: {block: add}
+  edges: ["in -> c1", "c1 -> c2", "c2 -> skip.a", "in -> skip.b"]
+  outputs: {out: skip}

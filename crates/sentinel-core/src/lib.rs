@@ -3,6 +3,7 @@
 pub mod authoring;
 pub mod blocks;
 pub mod codegen;
+pub mod compound;
 pub mod config;
 pub mod dataset_schema;
 pub mod gpu;

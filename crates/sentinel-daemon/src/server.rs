@@ -118,6 +118,8 @@ impl AppState {
     /// Built-ins plus whatever is in `./components` right now, so newly saved components
     /// show up without restarting the daemon.
     pub fn registry(&self) -> ComponentRegistry {
+        // Project blocks first: components that use them must validate when they load.
+        let _ = sentinel_core::compound::BlockLibrary::reload_project(&std::env::current_dir().unwrap_or_default().join("blocks"));
         let mut r = (*self.components).clone();
         let _ = r.load_from_dir(&std::env::current_dir().unwrap_or_default().join("components"));
         r
@@ -142,6 +144,7 @@ impl Server {
             .route("/api/vitals/history", get(get_vitals_history))
             .route("/api/system", get(get_system))
             .route("/api/components/save", post(save_component))
+            .route("/api/blocks/save", post(save_block))
             .route("/api/schema", get(schema_for_path))
             .route("/api/datasets/:name/schema", get(schema_for_dataset))
             .route("/api/tracking/runs", get(tracking_runs))
@@ -635,6 +638,7 @@ fn resolve_graph(
         let g = c.build_graph(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
         Ok((id.clone(), g))
     } else if let Some(raw) = &req.graph {
+        let _ = sentinel_core::compound::BlockLibrary::reload_project(&project_root().join("blocks"));
         let spec: sentinel_core::graph::GraphSpec = serde_json::from_value(raw.clone())
             .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("invalid graph: {e}")))?;
         let g = spec.validate().map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
@@ -645,8 +649,11 @@ fn resolve_graph(
 }
 
 async fn list_blocks() -> impl IntoResponse {
-    let blocks: Vec<_> = sentinel_core::blocks::Block::all().iter().map(|b| b.info()).collect();
-    Json(blocks)
+    let errors = sentinel_core::compound::BlockLibrary::reload_project(&project_root().join("blocks"));
+    for e in errors {
+        tracing::warn!("ignoring compound block: {e}");
+    }
+    Json(sentinel_core::compound::BlockLibrary::global().catalog())
 }
 
 /// Validation is a query: an invalid graph is a normal `200 {ok: false, error}` answer
@@ -658,25 +665,29 @@ async fn graph_validate(State(state): State<AppState>, Json(req): Json<GraphRequ
     }
 }
 
+/// Per-node description with shapes; compound nodes carry the same description of their inner graph.
+fn describe(g: &sentinel_core::graph::ValidatedGraph) -> serde_json::Map<String, serde_json::Value> {
+    use sentinel_core::graph::Dim;
+    let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+    let mut nodes = serde_json::Map::new();
+    for n in &g.order {
+        let b = g.kind(n);
+        let outs: serde_json::Map<String, serde_json::Value> = b.outputs().iter().map(|p| (p.clone(), json!(dims(&g.shapes[&format!("{n}.{p}")])))).collect();
+        let ins: serde_json::Map<String, serde_json::Value> = b.inputs().iter().map(|p| (p.clone(), json!(g.wires[&(n.clone(), p.clone())].key()))).collect();
+        let mut node = json!({ "block": b.name(), "tier": b.tier(), "inputs": ins, "outputs": outs });
+        if let Some(inner) = g.compounds.get(n) {
+            node["inner"] = json!({ "order": inner.order, "nodes": describe(inner) });
+        }
+        nodes.insert(n.clone(), node);
+    }
+    nodes
+}
+
 fn validate_graph(state: &AppState, req: &GraphRequest) -> Result<serde_json::Value, ApiError> {
     use sentinel_core::graph::Dim;
     let (id, g) = resolve_graph(state, req)?;
     let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
-    let mut nodes = serde_json::Map::new();
-    for n in &g.order {
-        let b = g.block(n);
-        let outs: serde_json::Map<String, serde_json::Value> = b
-            .outputs()
-            .iter()
-            .map(|p| (p.to_string(), json!(dims(&g.shapes[&format!("{n}.{p}")]))))
-            .collect();
-        let ins: serde_json::Map<String, serde_json::Value> = b
-            .inputs()
-            .iter()
-            .map(|p| (p.to_string(), json!(g.wires[&(n.clone(), p.to_string())].key())))
-            .collect();
-        nodes.insert(n.clone(), json!({ "block": b.name(), "inputs": ins, "outputs": outs }));
-    }
+    let nodes = describe(&g);
     let inputs: serde_json::Map<String, serde_json::Value> =
         g.spec.inputs.iter().map(|(k, v)| (k.clone(), json!(dims(v)))).collect();
     let outputs: serde_json::Map<String, serde_json::Value> =
@@ -824,4 +835,37 @@ async fn schema_for_path(Query(q): Query<SchemaQuery>) -> Result<Json<serde_json
         return Err(api_err(StatusCode::FORBIDDEN, "path is outside the project; mount it as a dataset first"));
     }
     inspect(&full)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveBlockRequest {
+    #[serde(flatten)]
+    pub spec: sentinel_core::authoring::SaveBlockSpec,
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+/// Save the canvas as a compound block under `blocks/<family>/<name>.yaml`; it appears in the palette immediately.
+async fn save_block(Json(req): Json<SaveBlockRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    use sentinel_core::compound::BlockLibrary;
+    let root = project_root();
+    let name = sentinel_core::authoring::snake(&req.spec.name);
+    // Shipped blocks (both tiers) are part of the binary and cannot be shadowed.
+    if BlockLibrary::builtin().resolve(&name).is_some() {
+        return Err(api_err(StatusCode::CONFLICT, format!("'{name}' is a built-in block; pick another name")));
+    }
+    let (mut lib, _) = BlockLibrary::with_dir(&root.join("blocks"));
+    if req.overwrite {
+        lib.remove(&name);
+    }
+    let (name, yaml) = sentinel_core::authoring::build_compound_yaml(&req.spec, &lib).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+    let rel = PathBuf::from("blocks").join(sentinel_core::authoring::snake(&req.spec.family)).join(format!("{name}.yaml"));
+    let path = root.join(&rel);
+    if path.exists() && !req.overwrite {
+        return Err(api_err(StatusCode::CONFLICT, format!("{} already exists", rel.display())));
+    }
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    std::fs::write(&path, yaml).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let _ = BlockLibrary::reload_project(&root.join("blocks"));
+    Ok(Json(json!({ "ok": true, "name": name, "path": rel.display().to_string() })))
 }

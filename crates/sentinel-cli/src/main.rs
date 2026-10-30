@@ -248,26 +248,29 @@ async fn main() -> anyhow::Result<()> {
                 println!("Saving run {run_id} as component '{name}'...");
             }
             ComponentCommands::Blocks => {
-                let mut family = "";
-                for b in sentinel_core::blocks::Block::all() {
-                    let i = b.info();
-                    if i.family != family {
-                        family = i.family;
-                        println!("\n[{family}]");
-                    }
-                    let params: Vec<String> = i
-                        .params
-                        .iter()
-                        .map(|p| if p.required { format!("{}*", p.name) } else { p.name.to_string() })
-                        .collect();
+                for e in sentinel_core::compound::BlockLibrary::reload_project(Path::new("blocks")) {
+                    eprintln!("warning: ignoring compound block: {e}");
+                }
+                let catalog = sentinel_core::compound::BlockLibrary::global().catalog();
+                for tier in ["fundamental", "compound"] {
                     println!(
-                        "  {:<20} in: {:<8} out: {:<9} params: {}",
-                        i.name,
-                        i.inputs.join(","),
-                        i.outputs.join(","),
-                        params.join(", ")
+                        "\n{}",
+                        if tier == "fundamental" { "FUNDAMENTAL BLOCKS  (native, one PyTorch module each)" } else { "COMPOUND BLOCKS  (subgraphs built from the blocks below them)" }
                     );
-                    println!("      {}", i.description);
+                    let mut family = String::new();
+                    for i in catalog.iter().filter(|i| i.tier == tier) {
+                        if i.family != family {
+                            family = i.family.clone();
+                            println!("\n  [{family}]");
+                        }
+                        let params: Vec<String> = i.params.iter().map(|p| if p.required { format!("{}*", p.name) } else { p.name.clone() }).collect();
+                        println!("    {:<22} in: {:<8} out: {:<9} params: {}", i.name, i.inputs.join(","), i.outputs.join(","), params.join(", "));
+                        if i.uses.is_empty() {
+                            println!("        {}", i.description);
+                        } else {
+                            println!("        {}  (built from: {})", i.description, i.uses.join(", "));
+                        }
+                    }
                 }
                 println!("\n(* = required parameter)");
             }
@@ -276,24 +279,7 @@ async fn main() -> anyhow::Result<()> {
                 for (name, shape) in &g.spec.inputs {
                     println!("input  {name:<14} {}", sentinel_core::graph::fmt_shape(shape));
                 }
-                for node in &g.order {
-                    let b = g.block(node);
-                    for port in b.outputs() {
-                        let shape = &g.shapes[&format!("{node}.{port}")];
-                        let ins: Vec<String> = b
-                            .inputs()
-                            .iter()
-                            .map(|p| g.wires[&(node.clone(), p.to_string())].key())
-                            .collect();
-                        println!(
-                            "node   {:<14} {:<20} {:<22} <- {}",
-                            format!("{node}.{port}"),
-                            b.name(),
-                            sentinel_core::graph::fmt_shape(shape),
-                            ins.join(", ")
-                        );
-                    }
-                }
+                print_nodes(&g, 0);
                 for (name, src) in &g.outputs {
                     println!("output {name:<14} = {}", src.key());
                 }
@@ -367,6 +353,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// Resolve a registry component (plus `--set k=v` overrides) into a validated graph.
 fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::graph::ValidatedGraph> {
+    let _ = sentinel_core::compound::BlockLibrary::reload_project(Path::new("blocks"));
     let mut registry = ComponentRegistry::new();
     let _ = registry.load_from_dir(Path::new("components"));
     let from_file;
@@ -387,6 +374,28 @@ fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core:
     }
     c.validate_overrides(&overrides)?;
     Ok(c.build_graph(&overrides)?)
+}
+
+/// Print a graph's nodes with shapes; compound blocks are expanded one indent level deeper.
+fn print_nodes(g: &sentinel_core::graph::ValidatedGraph, depth: usize) {
+    let pad = "  ".repeat(depth);
+    for node in &g.order {
+        let b = g.kind(node);
+        for port in b.outputs() {
+            let shape = &g.shapes[&format!("{node}.{port}")];
+            let ins: Vec<String> = b.inputs().iter().map(|p| g.wires[&(node.clone(), p.clone())].key()).collect();
+            println!(
+                "node   {pad}{:<14} {:<22} {:<20} <- {}",
+                format!("{node}.{port}"),
+                if b.tier() == "compound" { format!("{} (compound)", b.name()) } else { b.name() },
+                sentinel_core::graph::fmt_shape(shape),
+                ins.join(", ")
+            );
+        }
+        if let Some(inner) = g.compounds.get(node) {
+            print_nodes(inner, depth + 1);
+        }
+    }
 }
 
 async fn run_dev(port: u16, host: &str) -> anyhow::Result<()> {
