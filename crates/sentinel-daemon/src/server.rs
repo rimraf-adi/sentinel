@@ -28,6 +28,16 @@ pub struct AppState {
     pub components: Arc<ComponentRegistry>,
 }
 
+impl AppState {
+    /// Built-ins plus whatever is in `./components` right now, so newly saved components
+    /// show up without restarting the daemon.
+    pub fn registry(&self) -> ComponentRegistry {
+        let mut r = (*self.components).clone();
+        let _ = r.load_from_dir(&std::env::current_dir().unwrap_or_default().join("components"));
+        r
+    }
+}
+
 pub struct Server;
 
 impl Server {
@@ -42,6 +52,7 @@ impl Server {
             .route("/api/jobs/:id/stop", post(stop_job))
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
+            .route("/api/components/save", post(save_component))
             .route("/api/tracking/runs", get(tracking_runs))
             .route("/api/tracking/runs/:id", get(tracking_run))
             .route("/api/blocks", get(list_blocks))
@@ -138,8 +149,8 @@ async fn run_component_job(
     State(state): State<AppState>,
     Json(req): Json<RunComponentRequest>,
 ) -> Result<Json<JobRecord>, (StatusCode, String)> {
-    let component = state
-        .components
+    let registry = state.registry();
+    let component = registry
         .get(&req.component_id)
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Component '{}' not found", req.component_id)))?;
 
@@ -211,7 +222,7 @@ async fn get_hardware(State(state): State<AppState>) -> Json<HardwareStats> {
 }
 
 async fn list_components(State(state): State<AppState>) -> impl IntoResponse {
-    let components: Vec<_> = state.components.list().into_iter().cloned().collect();
+    let components: Vec<_> = state.registry().list().into_iter().cloned().collect();
     Json(components)
 }
 
@@ -486,8 +497,8 @@ fn resolve_graph(
     req: &GraphRequest,
 ) -> Result<(String, sentinel_core::graph::ValidatedGraph), ApiError> {
     if let Some(id) = &req.component_id {
-        let c = state
-            .components
+        let registry = state.registry();
+        let c = registry
             .get(id)
             .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("Component '{id}' not found")))?;
         let mut ov = HashMap::new();
@@ -623,4 +634,35 @@ async fn tracking_runs() -> impl IntoResponse {
 async fn tracking_run(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json::Value>, StatusCode> {
     let (run, metrics) = sentinel_core::tracking::read_run(&mlruns_root(), &id, 600).ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(json!({ "run": run, "metrics": metrics })))
+}
+
+// ---------------------------------------------------------------------------
+// Authoring: save a drawn graph as a component file
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct SaveComponentRequest {
+    #[serde(flatten)]
+    pub spec: sentinel_core::authoring::SaveSpec,
+    #[serde(default)]
+    pub overwrite: bool,
+}
+
+async fn save_component(Json(req): Json<SaveComponentRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let (id, yaml) = sentinel_core::authoring::build_component_yaml(&req.spec)
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+
+    // Shipped components are part of the binary; never shadow them with a file.
+    if ComponentRegistry::new().get(&id).is_some() {
+        return Err(api_err(StatusCode::CONFLICT, format!("'{id}' is a built-in component; pick another name")));
+    }
+    let rel = PathBuf::from("components").join(sentinel_core::authoring::slugify(&req.spec.domain))
+        .join(format!("{}.yaml", sentinel_core::authoring::slugify(&req.spec.name)));
+    let path = std::env::current_dir().unwrap_or_default().join(&rel);
+    if path.exists() && !req.overwrite {
+        return Err(api_err(StatusCode::CONFLICT, format!("{} already exists", rel.display())));
+    }
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    std::fs::write(&path, yaml).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!({ "ok": true, "component_id": id, "path": rel.display().to_string() })))
 }

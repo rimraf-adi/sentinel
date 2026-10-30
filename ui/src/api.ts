@@ -123,6 +123,7 @@ export interface ValidateOk {
   outputs: Record<string, string>;
   trainable: boolean;
   spec: GraphSpec;
+  params: Record<string, Record<string, unknown>>;
 }
 export interface ApiErr {
   ok: false;
@@ -175,6 +176,8 @@ export const api = {
   file: (path: string) => req<{ content: string; path: string }>(`/api/files/content?path=${encodeURIComponent(path)}`),
   trackedRuns: () => req<TrackedRun[]>('/api/tracking/runs'),
   trackedRun: (id: string) => req<{ run: TrackedRun; metrics: Record<string, MetricPoint[]> }>(`/api/tracking/runs/${id}`),
+  saveComponent: (b: { name: string; domain: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
+    post<{ ok: true; component_id: string; path: string }>('/api/components/save', b),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
   validate: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) =>
     post<ValidateOk | ApiErr>('/api/graph/validate', b).catch((e: Error) => ({ ok: false, error: e.message }) as ApiErr),

@@ -8,6 +8,7 @@ import { Modal, useToast } from '../ui';
 import { BlockNodeView, BuilderCtx, InputNodeView, OutputNodeView } from './BlockNode';
 import { IDENT, emptyGraph, fromSpec, toSpec, wouldCycle } from './convert';
 import { Inspector } from './Inspector';
+import { SaveModal } from './SaveModal';
 import type { BNode, Graph } from './types';
 
 const nodeTypes = { block: BlockNodeView, input: InputNodeView, output: OutputNodeView };
@@ -37,6 +38,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
   const [status, setStatus] = useState<Status>({ kind: 'idle', text: 'empty graph' });
   const [errorNode, setErrorNode] = useState<string | null>(null);
   const [code, setCode] = useState<{ title: string; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   /* ---------- history ---------- */
   const past = useRef<Graph[]>([]);
@@ -65,11 +67,13 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
     return () => window.removeEventListener('keydown', on);
   }, [undo, redo]);
 
+  const refreshReady = useCallback(() => { api.components().then((c) => setReady(c.filter((x) => x.graph))).catch(() => {}); }, []);
+
   /* ---------- load catalogs ---------- */
   useEffect(() => {
     api.blocks().then((l) => setBlocks(Object.fromEntries(l.map((b) => [b.name, b])))).catch((e: Error) => toast(e.message, true));
-    api.components().then((c) => setReady(c.filter((x) => x.graph))).catch(() => {});
-  }, [toast]);
+    refreshReady();
+  }, [toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async (componentId: string) => {
     const r = await api.validate({ component_id: componentId });
@@ -235,6 +239,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
         <button className="btn" onClick={undo} disabled={!past.current.length}>Undo</button>
         <button className="btn" onClick={redo} disabled={!future.current.length}>Redo</button>
         <button className="btn" onClick={compose} disabled={!hasBlocks}>View PyTorch</button>
+        <button className="btn" onClick={() => setSaving(true)} disabled={!result} title={result ? 'Save as a reusable component' : 'Fix validation errors first'}>Save as component</button>
         <button className="btn primary" onClick={run} disabled={!hasBlocks}>Run</button>
         <div className={'bd-status ' + status.kind} title={status.text}>{status.text}</div>
       </div>
@@ -275,6 +280,10 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
             setTraining={(t) => apply((p) => ({ ...p, training: t }), true)} patchData={patchData} rename={rename} remove={removeSelected} />
         </div>
       </div>
+      {saving && result && (
+        <SaveModal spec={toSpec(g)} result={result} blocks={blocks} domains={[...new Set(ready.map((c) => c.domain))].sort()}
+          onClose={() => setSaving(false)} onSaved={refreshReady} />
+      )}
       {code && (
         <Modal wide title={code.title} onClose={() => setCode(null)}>
           <pre className="code">{code.text}</pre>

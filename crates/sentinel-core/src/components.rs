@@ -219,7 +219,7 @@ impl Component {
 }
 
 /// Registry to discover, load, and manage built-in and custom user components.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ComponentRegistry {
     components: HashMap<String, Component>,
 }

@@ -1,5 +1,6 @@
 //! Sentinel Core: Domain models, components, config parsing, scaffolding, export, and storage interfaces.
 
+pub mod authoring;
 pub mod blocks;
 pub mod codegen;
 pub mod config;
