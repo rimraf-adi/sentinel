@@ -157,6 +157,16 @@ enum ModelCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Draw samples from a GAN run's generator
+    Generate {
+        run: String,
+        #[arg(short, long, default_value = "5")]
+        count: usize,
+        #[arg(long, default_value = "0")]
+        seed: u64,
+        #[arg(long)]
+        json: bool,
+    },
     /// Copy an exported file out of a run
     Export {
         run: String,
@@ -179,8 +189,8 @@ async fn main() -> anyhow::Result<()> {
             run_dev(port, &host).await?;
         }
         Some(Commands::Run { component, set }) => {
-            let g = build_graph(&component, &set)?;
-            let code = sentinel_core::codegen::generate_training_script(&g, &component)?;
+            let built = build_any(&component, &set)?;
+            let code = built.training_script(&component)?;
             let root = std::env::current_dir()?;
             let script = sentinel_core::sdk::write_generated_script(&root, &component, &uuid::Uuid::new_v4().simple().to_string()[..8], &code)?;
             println!("Running {component}  (script: {})", script.display());
@@ -307,21 +317,34 @@ async fn main() -> anyhow::Result<()> {
                 println!("\n(* = required parameter)");
             }
             ComponentCommands::Show { component, set } => {
-                let g = build_graph(&component, &set)?;
-                for (name, shape) in &g.spec.inputs {
-                    println!("input  {name:<14} {}", sentinel_core::graph::fmt_shape(shape));
-                }
-                print_nodes(&g, 0);
-                for (name, src) in &g.outputs {
-                    println!("output {name:<14} = {}", src.key());
+                use sentinel_core::components::Built;
+                let show = |title: Option<&str>, g: &sentinel_core::graph::ValidatedGraph| {
+                    if let Some(t) = title {
+                        println!("\n== {t} ==");
+                    }
+                    for (name, shape) in &g.spec.inputs {
+                        println!("input  {name:<14} {}", sentinel_core::graph::fmt_shape(shape));
+                    }
+                    print_nodes(g, 0);
+                    for (name, src) in &g.outputs {
+                        println!("output {name:<14} = {}", src.key());
+                    }
+                };
+                match build_any(&component, &set)? {
+                    Built::Graph(g) => show(None, &g),
+                    Built::Gan(v) => {
+                        show(Some("generator"), &v.generator);
+                        show(Some("discriminator"), &v.discriminator);
+                        println!("\ntraining: latent {} · {} epochs · lr_g {} · lr_d {} · {} discriminator step(s) per generator step", v.training.latent, v.training.epochs, v.training.lr_g, v.training.lr_d, v.training.d_steps);
+                    }
                 }
             }
             ComponentCommands::Compose { component, output, set, model_only } => {
-                let g = build_graph(&component, &set)?;
+                let built = build_any(&component, &set)?;
                 let code = if model_only {
-                    format!("import torch\nimport torch.nn as nn\n\n{}", sentinel_core::codegen::generate_model(&g))
+                    format!("import torch\nimport torch.nn as nn\n\n{}", built.model_code())
                 } else {
-                    sentinel_core::codegen::generate_training_script(&g, &component)?
+                    built.training_script(&component)?
                 };
                 std::fs::write(&output, code)?;
                 println!("Composed '{component}' -> {output}");
@@ -384,7 +407,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Resolve a registry component (plus `--set k=v` overrides) into a validated graph.
-fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::graph::ValidatedGraph> {
+/// Resolve a component (id or YAML file) plus `--set` overrides into a graph, or a GAN's pair of graphs.
+fn build_any(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::components::Built> {
     let _ = sentinel_core::compound::BlockLibrary::reload_project(Path::new("blocks"));
     let mut registry = ComponentRegistry::new();
     let _ = registry.load_from_dir(Path::new("components"));
@@ -405,7 +429,7 @@ fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core:
         overrides.insert(k.to_string(), serde_yaml::from_str(v)?);
     }
     c.validate_overrides(&overrides)?;
-    Ok(c.build_graph(&overrides)?)
+    Ok(c.build(&overrides)?)
 }
 
 /// Print a graph's nodes with shapes; compound blocks are expanded one indent level deeper.

@@ -106,8 +106,14 @@ fn emit_class(class: &str, g: &ValidatedGraph, book: &mut ClassBook, tuple_out: 
 
 /// Emit `class Model(nn.Module)` for the graph, preceded by one class per compound block it uses.
 pub fn generate_model(g: &ValidatedGraph) -> String {
+    generate_models(&[("Model", g)])
+}
+
+/// Several named model classes sharing one set of helper and compound classes, so two graphs that use the same
+/// compound block (a GAN's generator and discriminator) never define it twice.
+pub fn generate_models(models: &[(&str, &ValidatedGraph)]) -> String {
     let mut book = ClassBook::default();
-    let model = emit_class("Model", g, &mut book, false);
+    let classes: Vec<String> = models.iter().map(|(name, g)| emit_class(name, g, &mut book, false)).collect();
     let mut out = String::new();
     for src in book.helpers.values() {
         out.push_str(src);
@@ -117,11 +123,11 @@ pub fn generate_model(g: &ValidatedGraph) -> String {
         out.push_str(src);
         out.push_str("\n\n");
     }
-    out.push_str(&model);
+    out.push_str(&classes.join("\n\n"));
     out
 }
 
-fn feats_literal(features: &[String]) -> String {
+pub(crate) fn feats_literal(features: &[String]) -> String {
     features.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>().join(", ")
 }
 

@@ -7,6 +7,7 @@ pub mod compound;
 pub mod config;
 pub mod dataset_schema;
 pub mod gpu;
+pub mod gan;
 pub mod graph;
 pub mod export;
 pub mod models;

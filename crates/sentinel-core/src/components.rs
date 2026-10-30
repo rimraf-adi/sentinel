@@ -81,6 +81,34 @@ pub struct Component {
     /// Optional DAG of blocks; `${param}` placeholders resolve from `parameters`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graph: Option<serde_yaml::Value>,
+    /// A generative adversarial network: two graphs (`generator`, `discriminator`) and a `training` recipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gan: Option<serde_yaml::Value>,
+}
+
+/// What a component builds into: one graph, or a GAN's pair.
+#[derive(Debug, Clone)]
+pub enum Built {
+    Graph(crate::graph::ValidatedGraph),
+    Gan(Box<crate::gan::ValidatedGan>),
+}
+
+impl Built {
+    /// The standalone training script for this kind of component.
+    pub fn training_script(&self, id: &str) -> Result<String, crate::graph::GraphError> {
+        match self {
+            Built::Graph(g) => crate::codegen::generate_training_script(g, id),
+            Built::Gan(v) => crate::gan::generate_gan_script(v, id),
+        }
+    }
+
+    /// Only the model class(es), without data loading or a training loop.
+    pub fn model_code(&self) -> String {
+        match self {
+            Built::Graph(g) => crate::codegen::generate_model(g),
+            Built::Gan(v) => crate::codegen::generate_models(&[("Generator", &v.generator), ("Discriminator", &v.discriminator)]),
+        }
+    }
 }
 
 fn default_schema_version() -> String {
@@ -111,31 +139,28 @@ impl Component {
                 "name cannot be empty".to_string(),
             ));
         }
+        if self.graph.is_some() && self.gan.is_some() {
+            return Err(ComponentError::ValidationError("a component has either a `graph` or a `gan`, not both".into()));
+        }
         if self.graph.is_some() {
             self.build_graph(&HashMap::new())
                 .map_err(|e| ComponentError::ValidationError(format!("graph: {e}")))?;
+        }
+        if self.gan.is_some() {
+            self.build_gan(&HashMap::new())
+                .map_err(|e| ComponentError::ValidationError(format!("gan: {e}")))?;
         }
         Ok(())
     }
 
     /// Resolve `${param}` placeholders (overrides > locked > defaults) and validate the graph.
-    pub fn build_graph(
-        &self,
-        overrides: &HashMap<String, serde_yaml::Value>,
-    ) -> Result<crate::graph::ValidatedGraph, crate::graph::GraphError> {
-        let raw = self
-            .graph
-            .as_ref()
-            .ok_or_else(|| crate::graph::GraphError::Parse("component has no graph".into()))?;
+    /// `${param}` values: defaults, then locked, then overrides; unknown overrides are an error.
+    fn resolve_vars(&self, overrides: &HashMap<String, serde_yaml::Value>) -> Result<std::collections::BTreeMap<String, serde_yaml::Value>, crate::graph::GraphError> {
         for k in overrides.keys() {
             if !self.parameters.contains_key(k) && !self.locked.contains_key(k) {
                 let mut known: Vec<&str> = self.parameters.keys().map(|s| s.as_str()).collect();
                 known.sort();
-                return Err(crate::graph::GraphError::Parse(format!(
-                    "unknown parameter '{k}' for {} (known: {})",
-                    self.component_id,
-                    known.join(", ")
-                )));
+                return Err(crate::graph::GraphError::Parse(format!("unknown parameter '{k}' for {} (known: {})", self.component_id, known.join(", "))));
             }
         }
         let mut vars = std::collections::BTreeMap::new();
@@ -148,8 +173,35 @@ impl Component {
         for (k, v) in overrides {
             vars.insert(k.clone(), v.clone());
         }
-        let resolved = crate::graph::substitute(raw, &vars);
-        crate::graph::GraphSpec::from_value(resolved)?.validate()
+        Ok(vars)
+    }
+
+    pub fn build_graph(
+        &self,
+        overrides: &HashMap<String, serde_yaml::Value>,
+    ) -> Result<crate::graph::ValidatedGraph, crate::graph::GraphError> {
+        let raw = self
+            .graph
+            .as_ref()
+            .ok_or_else(|| crate::graph::GraphError::Parse("component has no graph".into()))?;
+        let vars = self.resolve_vars(overrides)?;
+        crate::graph::GraphSpec::from_value(crate::graph::substitute(raw, &vars))?.validate()
+    }
+
+    pub fn build_gan(&self, overrides: &HashMap<String, serde_yaml::Value>) -> Result<crate::gan::ValidatedGan, crate::graph::GraphError> {
+        let raw = self.gan.as_ref().ok_or_else(|| crate::graph::GraphError::Parse("component is not a GAN".into()))?;
+        let vars = self.resolve_vars(overrides)?;
+        let spec: crate::graph::GanSpec = serde_yaml::from_value(crate::graph::substitute(raw, &vars)).map_err(|e| crate::graph::GraphError::Parse(e.to_string()))?;
+        spec.validate()
+    }
+
+    /// Build whichever kind of model this component defines.
+    pub fn build(&self, overrides: &HashMap<String, serde_yaml::Value>) -> Result<Built, crate::graph::GraphError> {
+        if self.gan.is_some() {
+            Ok(Built::Gan(Box::new(self.build_gan(overrides)?)))
+        } else {
+            Ok(Built::Graph(self.build_graph(overrides)?))
+        }
     }
 
     /// Validate user overrides against component parameters and locked fields.
@@ -325,6 +377,7 @@ smoke_test:
             include_str!("../../../components/vision/unet.yaml"),
             include_str!("../../../components/vision/resnet-mini.yaml"),
             include_str!("../../../components/generative/vae.yaml"),
+            include_str!("../../../components/generative/gan.yaml"),
             include_str!("../../../components/graph/gcn-classifier.yaml"),
         ];
         for y in SHIPPED {
@@ -442,6 +495,7 @@ smoke_test:
             sweep: None,
             smoke_test: HashMap::new(),
             graph: None,
+            gan: None,
         };
 
         starter.parameters.insert(
@@ -480,6 +534,7 @@ smoke_test:
             sweep: None,
             smoke_test: HashMap::new(),
             graph: None,
+            gan: None,
         };
 
         for (k, v) in &resolved_config.values {

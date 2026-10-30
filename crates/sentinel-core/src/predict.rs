@@ -9,12 +9,33 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+const GENERATE_PY: &str = r#"
+import json, pathlib, sys
+import torch
+
+art = pathlib.Path(sys.argv[1])
+count, seed = int(sys.argv[2]), int(sys.argv[3])
+meta = json.load(open(art / "meta.json"))
+if meta["task"] != "gan":
+    raise SystemExit("this run is not a generative model (use predict)")
+if "generator_script" not in meta.get("files", {}):
+    raise SystemExit("this run has no TorchScript generator (see the training log for why)")
+torch.manual_seed(seed)
+g = torch.jit.load(str(art / meta["files"]["generator_script"]))
+g.train(False)
+with torch.no_grad():
+    s = g(torch.randn(count, meta["latent"]))
+print(json.dumps({"task": "gan", "features": meta["features"], "samples": s.tolist()}))
+"#;
+
 const PREDICT_PY: &str = r#"
 import json, pathlib, sys
 import torch
 
 art = pathlib.Path(sys.argv[1])
 meta = json.load(open(art / "meta.json"))
+if meta["task"] == "gan":
+    raise SystemExit("this run is a generative model: use generate, not predict")
 rows = json.load(sys.stdin)["inputs"]
 feats = meta["features"]
 x = torch.tensor(rows, dtype=torch.float32)
@@ -72,20 +93,32 @@ pub fn predict(run_dir: &Path, inputs: &[Vec<f64>]) -> Result<Value, String> {
     if inputs.len() > 10_000 {
         return Err("at most 10000 rows per request".into());
     }
+    run_python(run_dir, PREDICT_PY, &[], json!({ "inputs": inputs }).to_string())
+}
+
+/// Draw `count` samples from a GAN run's generator.
+pub fn generate(run_dir: &Path, count: usize, seed: u64) -> Result<Value, String> {
+    if count == 0 || count > 5_000 {
+        return Err("count must be between 1 and 5000".into());
+    }
+    run_python(run_dir, GENERATE_PY, &[count.to_string(), seed.to_string()], String::new())
+}
+
+fn run_python(run_dir: &Path, script: &str, extra: &[String], stdin_payload: String) -> Result<Value, String> {
     let art = run_dir.join("artifacts");
     if !art.join("meta.json").exists() {
         return Err("this run has no exported model (meta.json missing); train it with a Sentinel graph component".into());
     }
     let mut child = Command::new(crate::platform::python_exe())
-        .args(["-I", "-c", PREDICT_PY])
+        .args(["-I", "-c", script])
         .arg(&art)
+        .args(extra)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("could not start {}: {e}", crate::platform::python_exe()))?;
-    let payload = json!({ "inputs": inputs }).to_string();
-    child.stdin.take().ok_or("no stdin")?.write_all(payload.as_bytes()).map_err(|e| e.to_string())?;
+    child.stdin.take().ok_or("no stdin")?.write_all(stdin_payload.as_bytes()).map_err(|e| e.to_string())?;
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(child.wait_with_output());

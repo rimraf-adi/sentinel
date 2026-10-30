@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type ModelMeta, type PredictResult, type MetricPoint, type TrackedRun } from '../api';
+import { api, type GenerateResult, type ModelMeta, type PredictResult, type MetricPoint, type TrackedRun } from '../api';
 import { usePoll } from '../hooks';
 import { Icon } from '../icons';
 import { LineChart, type Series } from '../LineChart';
@@ -12,19 +12,44 @@ const dur = (r: TrackedRun) => (r.start_time && r.end_time ? `${((r.end_time - r
 
 const bytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
+/** Generated samples: a scatter plot for 2-D data, otherwise a table of the first rows. */
+function Scatter({ result }: { result: GenerateResult }) {
+  const rows = result.samples;
+  if (result.features.length === 2) {
+    const xs = rows.map((r) => r[0]), ys = rows.map((r) => r[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const W = 300, H = 220, m = 28, sx = (v: number) => m + ((v - x0) / Math.max(1e-9, x1 - x0)) * (W - 2 * m), sy = (v: number) => H - m - ((v - y0) / Math.max(1e-9, y1 - y0)) * (H - 2 * m);
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${rows.length} generated samples`} style={{ maxWidth: 360, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }}>
+        {rows.map((r, i) => <circle key={i} cx={sx(r[0])} cy={sy(r[1])} r="2.2" fill="#7c5cff" fillOpacity=".6" />)}
+        <text x={W / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#8c8c99">{result.features[0]} ({x0.toFixed(1)} … {x1.toFixed(1)})</text>
+        <text x={8} y={H / 2} fontSize="10" fill="#8c8c99" transform={`rotate(-90 8 ${H / 2})`} textAnchor="middle">{result.features[1]} ({y0.toFixed(1)} … {y1.toFixed(1)})</text>
+      </svg>
+    );
+  }
+  return <div className="mono" style={{ fontSize: 11 }}>{rows.slice(0, 8).map((r, i) => <div key={i}>{r.map((v) => v.toFixed(3)).join('  ')}</div>)}</div>;
+}
+
 /** Download a run's exports and try its model on new data. */
 function ModelPanel({ run }: { run: TrackedRun }) {
   const toast = useToast();
   const [info, setInfo] = useState<{ files: { name: string; bytes: number }[]; meta: ModelMeta | null } | null>(null);
   const [vals, setVals] = useState<string[]>([]);
   const [res, setRes] = useState<PredictResult | null>(null);
+  const [gen, setGen] = useState<GenerateResult | null>(null);
+  const [count, setCount] = useState(200);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     setRes(null);
+    setGen(null);
     api.artifacts(run.run_id).then((i) => { setInfo(i); setVals((i.meta?.features ?? []).map(() => '0')); }).catch(() => setInfo({ files: [], meta: null }));
   }, [run.run_id]);
   if (!info) return null;
   const meta = info.meta;
+  const sample = async () => {
+    setBusy(true);
+    try { setGen(await api.generate(run.run_id, count, Math.floor(Math.random() * 1e6))); } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+  };
   const go = async () => {
     setBusy(true);
     try { setRes(await api.predict(run.run_id, [vals.map(Number)])); } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
@@ -42,6 +67,17 @@ function ModelPanel({ run }: { run: TrackedRun }) {
             </div>
             <p className="hint">TorchScript loads with <span className="mono">torch.jit.load</span> and needs no Sentinel code. <span className="mono">sentinel model predict {run.run_id.slice(0, 8)} -i …</span> does the same from the terminal.</p>
           </div>
+          {meta.task === 'gan' ? (
+          <div>
+            <div className="stat-title">Generate</div>
+            <div className="row" style={{ margin: '8px 0' }}>
+              <label className="field" style={{ margin: 0 }}><span style={{ display: 'block', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 2 }}>samples</span>
+                <input type="number" min={1} max={5000} value={count} onChange={(e) => setCount(Math.max(1, Math.min(5000, +e.target.value || 1)))} aria-label="samples" style={{ width: 100 }} /></label>
+              <button className="btn primary sm" style={{ alignSelf: 'flex-end' }} onClick={sample} disabled={busy}>{busy ? 'Sampling…' : 'Generate'}</button>
+            </div>
+            {gen && <Scatter result={gen} />}
+          </div>
+          ) : (
           <div>
             <div className="stat-title">Try it</div>
             <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', margin: '8px 0' }}>
@@ -64,6 +100,7 @@ function ModelPanel({ run }: { run: TrackedRun }) {
             {res?.task === 'regression' && <div className="stat-value" style={{ marginTop: 10 }}>{res.values[0].map((v) => +v.toPrecision(5)).join(', ')}</div>}
             {res?.task === 'vae' && <div className="mono" style={{ fontSize: 12, marginTop: 10 }}>reconstruction {JSON.stringify(res.reconstruction[0].map((v) => +v.toPrecision(4)))}<br />latent mean {JSON.stringify(res.latent_mean[0].map((v) => +v.toPrecision(4)))}</div>}
           </div>
+          )}
         </div>
       )}
     </div>

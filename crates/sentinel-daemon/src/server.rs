@@ -152,6 +152,7 @@ impl Server {
             .route("/api/tracking/runs/:id/artifacts", get(run_artifacts))
             .route("/api/tracking/runs/:id/artifacts/:name", get(download_artifact))
             .route("/api/predict", post(predict_run))
+            .route("/api/generate", post(generate_run))
             .route("/api/blocks", get(list_blocks))
             .route("/api/graph/validate", post(graph_validate))
             .route("/api/graph/compose", post(graph_compose))
@@ -626,7 +627,8 @@ fn api_err(code: StatusCode, msg: impl ToString) -> ApiError {
 fn resolve_graph(
     state: &AppState,
     req: &GraphRequest,
-) -> Result<(String, sentinel_core::graph::ValidatedGraph), ApiError> {
+) -> Result<(String, sentinel_core::components::Built), ApiError> {
+    use sentinel_core::components::Built;
     if let Some(id) = &req.component_id {
         let registry = state.registry();
         let c = registry
@@ -638,14 +640,14 @@ fn resolve_graph(
             ov.insert(k.clone(), y);
         }
         c.validate_overrides(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
-        let g = c.build_graph(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
-        Ok((id.clone(), g))
+        let built = c.build(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+        Ok((id.clone(), built))
     } else if let Some(raw) = &req.graph {
         let _ = sentinel_core::compound::BlockLibrary::reload_project(&project_root().join("blocks"));
         let spec: sentinel_core::graph::GraphSpec = serde_json::from_value(raw.clone())
             .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("invalid graph: {e}")))?;
         let g = spec.validate().map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
-        Ok(("canvas".to_string(), g))
+        Ok(("canvas".to_string(), Built::Graph(g)))
     } else {
         Err(api_err(StatusCode::BAD_REQUEST, "provide either component_id or graph"))
     }
@@ -687,8 +689,21 @@ fn describe(g: &sentinel_core::graph::ValidatedGraph) -> serde_json::Map<String,
 }
 
 fn validate_graph(state: &AppState, req: &GraphRequest) -> Result<serde_json::Value, ApiError> {
+    use sentinel_core::components::Built;
     use sentinel_core::graph::Dim;
-    let (id, g) = resolve_graph(state, req)?;
+    let (id, built) = resolve_graph(state, req)?;
+    let g = match built {
+        Built::Graph(g) => g,
+        // A GAN is two graphs: describe both (the Builder edits a single graph, so it gets no `spec`).
+        Built::Gan(v) => {
+            return Ok(json!({
+                "ok": true, "id": id, "kind": "gan", "trainable": true,
+                "generator": { "order": v.generator.order, "nodes": describe(&v.generator) },
+                "discriminator": { "order": v.discriminator.order, "nodes": describe(&v.discriminator) },
+                "training": serde_json::to_value(&v.training).unwrap_or_default(),
+            }));
+        }
+    };
     let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
     let nodes = describe(&g);
     let inputs: serde_json::Map<String, serde_json::Value> =
@@ -703,14 +718,11 @@ fn validate_graph(state: &AppState, req: &GraphRequest) -> Result<serde_json::Va
     }))
 }
 
-fn compile(g: &sentinel_core::graph::ValidatedGraph, id: &str, model_only: bool) -> Result<String, ApiError> {
+fn compile(built: &sentinel_core::components::Built, id: &str, model_only: bool) -> Result<String, ApiError> {
     if model_only {
-        Ok(format!(
-            "import torch\nimport torch.nn as nn\n\n{}",
-            sentinel_core::codegen::generate_model(g)
-        ))
+        Ok(format!("import torch\nimport torch.nn as nn\n\n{}", built.model_code()))
     } else {
-        sentinel_core::codegen::generate_training_script(g, id).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+        built.training_script(id).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
     }
 }
 
@@ -718,8 +730,8 @@ async fn graph_compose(
     State(state): State<AppState>,
     Json(req): Json<GraphRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let (id, g) = resolve_graph(&state, &req)?;
-    let code = compile(&g, &id, req.model_only)?;
+    let (id, built) = resolve_graph(&state, &req)?;
+    let code = compile(&built, &id, req.model_only)?;
     Ok(Json(json!({ "ok": true, "id": id, "code": code })))
 }
 
@@ -727,8 +739,8 @@ async fn graph_run(
     State(state): State<AppState>,
     Json(req): Json<GraphRequest>,
 ) -> Result<Json<JobRecord>, ApiError> {
-    let (id, g) = resolve_graph(&state, &req)?;
-    let code = compile(&g, &id, false)?;
+    let (id, built) = resolve_graph(&state, &req)?;
+    let code = compile(&built, &id, false)?;
 
     let root = project_root();
     let io = |e: std::io::Error| api_err(StatusCode::INTERNAL_SERVER_ERROR, e);
@@ -909,6 +921,28 @@ async fn predict_run(Json(req): Json<PredictRequest>) -> Result<Json<serde_json:
     let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &req.run_id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
     // Prediction starts a Python process and can take seconds: keep it off the async threads.
     let result = tokio::task::spawn_blocking(move || sentinel_core::predict::predict(&dir, &req.inputs))
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GenerateRequest {
+    pub run_id: String,
+    #[serde(default = "default_count")]
+    pub count: usize,
+    #[serde(default)]
+    pub seed: u64,
+}
+
+fn default_count() -> usize {
+    16
+}
+
+/// Draw samples from a GAN run's generator.
+async fn generate_run(Json(req): Json<GenerateRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &req.run_id).ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
+    let result = tokio::task::spawn_blocking(move || sentinel_core::predict::generate(&dir, req.count, req.seed))
         .await
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))

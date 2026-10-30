@@ -39,7 +39,7 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
   };
   const run = async () => {
     try {
-      if (c.graph) await api.runGraph({ component_id: c.component_id, overrides: coerce() });
+      if (c.graph || c.gan) await api.runGraph({ component_id: c.component_id, overrides: coerce() });
       else await api.runComponent(c.component_id, coerce());
       toast('Experiment started'); refresh(); onClose(); go('runs');
     } catch (e) { toast((e as Error).message, true); }
@@ -97,7 +97,7 @@ export function Components({ refresh, go, openInBuilder }: { refresh: () => void
           <div className="card hover" key={c.component_id} style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="row sp" style={{ alignItems: 'flex-start' }}>
               <div className="icon-tile" style={{ background: colorOf(c.domain) + '22', color: colorOf(c.domain) }}>{c.domain.slice(0, 2).toUpperCase()}</div>
-              <div className="chips">{c.graph ? <span className="chip on">graph</span> : null}<span className="chip">{c.domain}</span></div>
+              <div className="chips">{c.graph ? <span className="chip on">graph</span> : null}{c.gan ? <span className="chip on">gan</span> : null}<span className="chip">{c.domain}</span></div>
             </div>
             <b style={{ marginTop: 12, fontSize: 14 }}>{c.name}</b>
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.component_id}</div>

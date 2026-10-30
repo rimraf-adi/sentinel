@@ -24,6 +24,10 @@ fn every_shipped_graph_component_validates() {
     for c in graphs {
         c.build_graph(&HashMap::new()).unwrap_or_else(|e| panic!("{}: {e}", c.component_id));
     }
+    // GAN components have no single graph; they must build as a pair
+    let gan = r.get("generative/gan@v1").expect("shipped GAN component");
+    assert!(gan.graph.is_none() && gan.gan.is_some());
+    gan.build(&HashMap::new()).unwrap();
 }
 
 #[test]

@@ -1,0 +1,41 @@
+schema_version: "1.0"
+component_id: "generative/gan@v1"
+name: "GAN"
+description: "Generative adversarial network for tabular data: a generator and a discriminator, both built from the compound mlp_block, trained against each other with two optimizers"
+domain: "generative"
+parameters:
+  features: {type: int, default: 2, range: [1, 4096], help: "Data dimensions (feature columns)"}
+  latent: {type: int, default: 8, range: [1, 512], help: "Noise vector size"}
+  hidden: {type: int, default: 64, range: [4, 2048], help: "Width of both networks"}
+  lr_g: {type: float, default: 0.001, range: [0.00001, 0.1], help: "Generator learning rate"}
+  lr_d: {type: float, default: 0.001, range: [0.00001, 0.1], help: "Discriminator learning rate"}
+  d_steps: {type: int, default: 1, range: [1, 10], help: "Discriminator updates per generator update"}
+  epochs: {type: int, default: 300, range: [1, 20000], help: "Training epochs"}
+  batch_size: {type: int, default: 64, range: [8, 8192], help: "Batch size"}
+  csv: {type: string, default: "data/demo.csv", help: "Real data to imitate"}
+  feature_cols: {type: string, default: "x1,x2", help: "Comma-separated numeric feature columns"}
+gan:
+  generator:
+    inputs: {z: [B, "${latent}"]}
+    nodes:
+      g1:  {block: mlp_block, params: {width: "${hidden}"}}
+      g2:  {block: mlp_block, params: {width: "${hidden}"}}
+      out: {block: linear, params: {out: "${features}"}}
+    edges: ["z -> g1", "g1 -> g2", "g2 -> out"]
+    outputs: {sample: out}
+  discriminator:
+    inputs: {x: [B, "${features}"]}
+    nodes:
+      d1:  {block: mlp_block, params: {width: "${hidden}", activation: leaky_relu}}
+      d2:  {block: mlp_block, params: {width: "${hidden}", activation: leaky_relu}}
+      out: {block: linear, params: {out: 1}}
+    edges: ["x -> d1", "d1 -> d2", "d2 -> out"]
+    outputs: {logit: out}
+  training:
+    latent: "${latent}"
+    epochs: "${epochs}"
+    batch_size: "${batch_size}"
+    lr_g: "${lr_g}"
+    lr_d: "${lr_d}"
+    d_steps: "${d_steps}"
+    data: {csv: "${csv}", features: "${feature_cols}"}

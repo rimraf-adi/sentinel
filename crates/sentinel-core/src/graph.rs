@@ -141,6 +141,45 @@ fn default_epochs() -> u32 {
     50
 }
 
+/// Training recipe for a generative adversarial network: two optimizers and an alternating loop.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GanTraining {
+    /// Size of the noise vector fed to the generator.
+    pub latent: usize,
+    #[serde(default = "default_epochs")]
+    pub epochs: u32,
+    #[serde(default)]
+    pub batch_size: Option<usize>,
+    #[serde(default = "default_gan_lr")]
+    pub lr_g: f64,
+    #[serde(default = "default_gan_lr")]
+    pub lr_d: f64,
+    #[serde(default = "default_gan_beta1")]
+    pub beta1: f64,
+    /// Discriminator updates per generator update.
+    #[serde(default = "default_d_steps")]
+    pub d_steps: u32,
+    pub data: DataSpec,
+}
+
+fn default_gan_lr() -> f64 {
+    2e-4
+}
+fn default_gan_beta1() -> f64 {
+    0.5
+}
+fn default_d_steps() -> u32 {
+    1
+}
+
+/// Two graphs trained against each other.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GanSpec {
+    pub generator: GraphSpec,
+    pub discriminator: GraphSpec,
+    pub training: GanTraining,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GraphSpec {
     pub inputs: BTreeMap<String, Shape>,

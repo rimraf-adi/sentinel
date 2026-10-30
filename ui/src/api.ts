@@ -88,6 +88,7 @@ export interface Component {
   parameters: Record<string, ParamSpec>;
   locked: Record<string, unknown>;
   graph?: unknown;
+  gan?: unknown;
 }
 export interface Dataset {
   name: string;
@@ -124,13 +125,14 @@ export interface CsvColumn { name: string; kind: 'numeric' | 'integer' | 'catego
 export interface Suggestion { target: string; features: string[]; task: 'classification' | 'regression'; loss: string; outputs: number }
 export interface CsvSchema { rows: number; columns: CsvColumn[]; suggestion: Suggestion | null }
 export interface ModelMeta {
-  graph: string; task: 'classification' | 'regression' | 'vae'; features: string[]; target: string | null; classes: string[] | null;
+  graph: string; task: 'classification' | 'regression' | 'vae' | 'gan'; features: string[]; target: string | null; classes: string[] | null;
   input_shape: number[]; loss: string; files: Record<string, string>; [k: string]: unknown;
 }
 export type PredictResult =
   | { task: 'classification'; predictions: { label: string; index: number; probabilities: Record<string, number> }[] }
   | { task: 'regression'; values: number[][] }
   | { task: 'vae'; reconstruction: number[][]; latent_mean: number[][] };
+export interface GenerateResult { task: 'gan'; features: string[]; samples: number[][] }
 export interface BlockParam {
   name: string;
   required: boolean;
@@ -243,6 +245,7 @@ export const api = {
   schemaOfPath: (path: string) => req<CsvSchema>(`/api/schema?path=${encodeURIComponent(path)}`),
   artifacts: (id: string) => req<{ files: { name: string; bytes: number }[]; meta: ModelMeta | null }>(`/api/tracking/runs/${id}/artifacts`),
   predict: (run_id: string, inputs: number[][]) => post<PredictResult>('/api/predict', { run_id, inputs }),
+  generate: (run_id: string, count: number, seed: number) => post<GenerateResult>('/api/generate', { run_id, count, seed }),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
   saveBlock: (b: { name: string; family: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
     post<{ ok: true; name: string; path: string }>('/api/blocks/save', b),

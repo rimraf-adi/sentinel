@@ -115,6 +115,10 @@ sentinel model export  b5a43acb -f onnx -o flowers.onnx   # torchscript | onnx |
 
 The same is available in the dashboard (Experiments, select a run: download chips and a "Try it" form) and over HTTP
 (`GET /api/tracking/runs/:id/artifacts`, `POST /api/predict {run_id, inputs}`). Run ids accept any unambiguous prefix.
+GAN runs (`generative/gan@v1`) export the generator the same way; `sentinel model generate <run> -c 8` and the dashboard's
+Generate button draw samples. A GAN component defines two graphs plus a training recipe (`gan: {generator, discriminator,
+training}`), both built from the same block hierarchy, with two optimizers and an alternating update loop.
+
 Predictions run in a short-lived Python process, so the daemon itself never loads PyTorch; batch size is free.
 
 ## Footprint

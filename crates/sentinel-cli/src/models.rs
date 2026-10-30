@@ -62,11 +62,25 @@ pub fn run(cmd: ModelCommands) -> anyhow::Result<()> {
                 }
             }
         }
+        ModelCommands::Generate { run, count, seed, json } => {
+            let (id, dir) = resolve(&run)?;
+            let result = predict::generate(&dir, count, seed).map_err(|e| anyhow::anyhow!(e))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                return Ok(());
+            }
+            let feats: Vec<String> = result["features"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            println!("run {} · {count} samples (seed {seed}) · {}", &id[..8], feats.join(", "));
+            for row in result["samples"].as_array().into_iter().flatten() {
+                let vals: Vec<String> = row.as_array().into_iter().flatten().map(|v| format!("{:>9.4}", v.as_f64().unwrap_or(f64::NAN))).collect();
+                println!("  {}", vals.join("  "));
+            }
+        }
         ModelCommands::Export { run, format, output } => {
             let (id, dir) = resolve(&run)?;
             let meta = predict::read_meta(&dir).ok_or_else(|| anyhow::anyhow!("run {id} has no exported model"))?;
             let file = match format.as_str() {
-                "torchscript" | "onnx" | "weights" => meta["files"][&format].as_str().map(String::from).ok_or_else(|| {
+                "torchscript" | "onnx" | "weights" | "generator" | "discriminator" => meta["files"][&format].as_str().map(String::from).ok_or_else(|| {
                     anyhow::anyhow!("this run has no {format} export (available: {})", meta["files"].as_object().map(|f| f.keys().cloned().collect::<Vec<_>>().join(", ")).unwrap_or_default())
                 })?,
                 "meta" => "meta.json".to_string(),
