@@ -36,6 +36,7 @@ impl Server {
     pub fn router(state: AppState) -> Router {
         Router::new()
             .route("/", get(dashboard_page))
+            .route("/favicon.ico", get(favicon_handler))
             .route("/api/health", get(health_check))
             .route("/api/jobs", get(list_jobs).post(submit_job))
             .route("/api/jobs/run-template", post(run_template_job))
@@ -92,6 +93,11 @@ async fn dashboard_page(State(state): State<AppState>) -> Html<String> {
 
     let html = DashboardView::render_html(&ui_state, Some(&stats), &jobs, &templates, &datasets);
     Html(html)
+}
+
+async fn favicon_handler() -> impl IntoResponse {
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#ffffff"/><polygon points="16,7 25,23 7,23" fill="#000000"/></svg>"##;
+    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], svg)
 }
 
 async fn health_check() -> impl IntoResponse {
