@@ -109,7 +109,21 @@ async fn main() -> anyhow::Result<()> {
             println!("Launching Sentinel run with config: {config}");
         }
         Some(Commands::Sweep { config }) => {
-            println!("Launching Sentinel sweep with config: {config}");
+            println!("🚀 Launching Sentinel Hyperparameter Sweep with config: {config}");
+            let mut cmd = tokio::process::Command::new("uv");
+            cmd.arg("run")
+                .arg("python")
+                .arg("recipes/sweep_orchestrator.py")
+                .arg("--trials")
+                .arg("8")
+                .arg("--workers")
+                .arg("2");
+
+            let status = cmd.status().await?;
+            if !status.success() {
+                eprintln!("Sweep execution exited with error code: {status}");
+                std::process::exit(1);
+            }
         }
         Some(Commands::Template { command }) => match command {
             TemplateCommands::List => {
