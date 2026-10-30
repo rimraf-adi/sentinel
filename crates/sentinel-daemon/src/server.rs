@@ -44,6 +44,8 @@ impl Server {
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
             .route("/api/templates", get(list_templates))
+            .route("/api/datasets", get(list_datasets).post(add_dataset))
+            .route("/api/datasets/:name", axum::routing::delete(remove_dataset))
             .route("/api/repo/status", get(get_repo_status))
             .route("/api/repo/init", post(init_repo))
             .route("/api/files", get(list_files))
@@ -83,9 +85,12 @@ async fn dashboard_page(State(state): State<AppState>) -> Html<String> {
     let stats = state.hardware_monitor.lock().await.collect_stats("local");
     let jobs = state.supervisor.list_jobs().await;
     let templates: Vec<_> = state.templates.list().into_iter().cloned().collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+    let datasets = sentinel_core::storage::DatasetRegistry::load_all(&canonical);
     let ui_state = DashboardState::new();
 
-    let html = DashboardView::render_html(&ui_state, Some(&stats), &jobs, &templates);
+    let html = DashboardView::render_html(&ui_state, Some(&stats), &jobs, &templates, &datasets);
     Html(html)
 }
 
@@ -220,11 +225,19 @@ struct FileItem {
 
 async fn list_files() -> impl IntoResponse {
     let mut files = Vec::new();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+
     let candidates = [
         "sentinel.yaml",
-        "sentinel.md",
-        "FILES.md",
+        "sentinel.lock",
+        "machines.yaml",
+        "datasets.yaml",
         "pyproject.toml",
+        "Cargo.toml",
+        "README.md",
+        "guide.md",
+        "FILES.md",
         "recipes/vision_train.py",
         "recipes/sweep_orchestrator.py",
         "templates/vision/image-classification.yaml",
@@ -236,7 +249,7 @@ async fn list_files() -> impl IntoResponse {
     ];
 
     for c in &candidates {
-        if Path::new(c).exists() {
+        if canonical.join(c).exists() {
             files.push(FileItem {
                 name: Path::new(c)
                     .file_name()
@@ -244,6 +257,19 @@ async fn list_files() -> impl IntoResponse {
                     .to_string_lossy()
                     .to_string(),
                 path: c.to_string(),
+                is_dir: false,
+            });
+        }
+    }
+
+    // Also include any registered dataset file paths
+    let datasets = sentinel_core::storage::DatasetRegistry::load_all(&canonical);
+    for d in datasets {
+        let p = Path::new(&d.path);
+        if p.is_file() {
+            files.push(FileItem {
+                name: format!("{} ({})", d.name, p.file_name().unwrap_or_default().to_string_lossy()),
+                path: d.path.clone(),
                 is_dir: false,
             });
         }
@@ -258,18 +284,107 @@ struct FileContentQuery {
 }
 
 async fn get_file_content(Query(q): Query<FileContentQuery>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let path = PathBuf::from(&q.path);
-    // Security check: reject paths traversing out of root
-    if path.is_absolute() || q.path.contains("..") {
+    let raw = q.path.trim();
+    if raw.contains("..") {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    if !path.exists() || !path.is_file() {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+
+    let expanded = if let Some(stripped) = raw.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            home.join(stripped)
+        } else {
+            PathBuf::from(raw)
+        }
+    } else if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        canonical.join(raw)
+    };
+
+    if !expanded.exists() || !expanded.is_file() {
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let content = std::fs::read_to_string(&path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Read safely with a 1MB limit for preview
+    let content = match std::fs::read_to_string(&expanded) {
+        Ok(c) => {
+            if c.len() > 1024 * 1024 {
+                format!("{}\n\n... [Truncated: File content exceeds 1MB preview limit] ...", &c[..1024 * 1024])
+            } else {
+                c
+            }
+        }
+        Err(_) => {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
     Ok(Json(json!({ "path": q.path, "content": content })))
+}
+
+async fn list_datasets() -> impl IntoResponse {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+    let datasets = sentinel_core::storage::DatasetRegistry::load_all(&canonical);
+    Json(datasets)
+}
+
+#[derive(Deserialize)]
+struct AddDatasetPayload {
+    name: String,
+    path: String,
+    #[serde(default = "default_ds_format")]
+    format: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    split: Option<String>,
+}
+
+fn default_ds_format() -> String {
+    "folder".to_string()
+}
+
+async fn add_dataset(Json(payload): Json<AddDatasetPayload>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+
+    let mut spec = sentinel_core::models::DatasetSpec::new(&payload.name, &payload.path, &payload.format);
+    spec.description = payload.description;
+    spec.split = payload.split;
+    spec.inspect(&canonical);
+
+    sentinel_core::storage::DatasetRegistry::add_dataset(&canonical, spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to register dataset: {e}"),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "dataset": spec
+    })))
+}
+
+async fn remove_dataset(AxumPath(name): AxumPath<String>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let canonical = cwd.canonicalize().unwrap_or(cwd);
+
+    sentinel_core::storage::DatasetRegistry::remove_dataset(&canonical, &name).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to unmount dataset: {e}"),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": format!("Dataset '{name}' unmounted from registry")
+    })))
 }
 
 async fn ws_handler(

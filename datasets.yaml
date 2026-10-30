@@ -1,0 +1,5 @@
+# Sentinel Dataset Mounts & Inventory
+# Datasets do not need to reside inside the repository.
+# Supports external filesystem paths (e.g. /mnt/nvme/data, ~/datasets/cifar10),
+# cloud mounts, and in-repo dataset files.
+datasets: []

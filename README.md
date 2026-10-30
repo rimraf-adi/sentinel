@@ -94,6 +94,12 @@ Sentinel addresses these structural bottlenecks through an asynchronous, bifurca
 * **Interactive Control Planes:** Recipe parameters, sweep boundaries, and process supervision controls remain fully interactive and editable.
 * **Graceful Empty-State Fallbacks:** System cards gracefully display operational standby states when experiments or external repositories are uninitialized.
 
+### 2.8 Flexible Dataset Mounting & External Storage Paths
+* **Zero Repo Bloat:** Large ML datasets (e.g., ImageNet, OpenWebText, Parquet tables) do not need to reside within the repository.
+* **External Path Mounts:** Supports arbitrary local filesystem paths (e.g. `/mnt/nvme/data`, `~/datasets/cifar10`), network shares, or in-repo data files.
+* **Python Resolution (`sentinel.get_dataset_path`):** Recipes and training scripts resolve mounted datasets automatically across environments without hardcoded paths.
+* **Live Storage Inspection:** The web console automatically validates dataset existence, total byte size, file count, and mount type (`EXTERNAL MOUNT` vs `IN REPO`).
+
 ---
 
 ## 3. Workspace Architecture

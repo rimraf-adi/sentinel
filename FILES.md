@@ -22,6 +22,7 @@ sentinel/
 ├── sentinel.lock                       # Machine-managed lockfile (tool version, templates & invariants)
 ├── sentinel.yaml                       # Workspace Sentinel configuration (project name, defaults, runners)
 ├── machines.yaml                       # Machine & worker node inventory (local & remote SSH)
+├── datasets.yaml                       # Dataset mounts & external filesystem paths inventory
 ├── .github/
 │   └── workflows/
 │       └── release.yml                 # CI workflow building platform wheels for 4 OS/arch targets

@@ -4,7 +4,7 @@
 //! Strictly blank when no data exists (no demo data). Identifies repository status via sentinel.lock.
 
 use crate::state::DashboardState;
-use sentinel_core::models::{HardwareStats, JobRecord};
+use sentinel_core::models::{DatasetSpec, HardwareStats, JobRecord};
 use sentinel_core::templates::Template;
 
 pub struct DashboardView;
@@ -16,6 +16,7 @@ impl DashboardView {
         stats: Option<&HardwareStats>,
         jobs: &[JobRecord],
         templates: &[Template],
+        datasets: &[DatasetSpec],
     ) -> String {
         let is_sentinel = state.is_sentinel_repo;
         let workspace_name = if state.workspace_name.is_empty() {
@@ -347,6 +348,101 @@ impl DashboardView {
             String::new()
         };
 
+        // Render Datasets & Files view (supports both in-repo datasets and external paths)
+        let datasets_html = if datasets.is_empty() {
+            r##"<div class="projects-empty-card">
+                <div class="projects-empty-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                    </svg>
+                </div>
+                <div class="projects-empty-title">No datasets registered yet</div>
+                <div class="projects-empty-desc">Datasets do not need to live inside this repository. You can mount external filesystem paths (NAS, NVMe, ~/datasets, /mnt/data) or in-repo data files.</div>
+                <div style="margin-top: 14px;">
+                    <button class="btn btn-primary btn-sm" onclick="openMountDatasetModal()">+ Mount / Add Dataset Path</button>
+                </div>
+            </div>"##.to_string()
+        } else {
+            let rows = datasets
+                .iter()
+                .map(|d| {
+                    let loc_badge = if d.is_external {
+                        r#"<span class="badge-external">EXTERNAL MOUNT</span>"#
+                    } else {
+                        r#"<span class="badge-inrepo">IN REPO</span>"#
+                    };
+                    let status_badge = if d.exists {
+                        format!(
+                            r#"<span class="status-connected"><span class="dot-green"></span> Connected ({} &middot; {} files)</span>"#,
+                            d.size_formatted,
+                            d.file_count.unwrap_or(0)
+                        )
+                    } else {
+                        r#"<span class="status-missing"><span class="dot-amber"></span> Path not found</span>"#.to_string()
+                    };
+                    let split_str = d.split.as_deref().unwrap_or("-");
+
+                    format!(
+                        r##"<tr>
+                            <td>
+                                <div style="font-weight: 600; color: #ffffff;">{}</div>
+                                <div style="font-size: 11px; color: var(--text-muted);">{}</div>
+                            </td>
+                            <td><span class="domain-tag font-mono">{}</span></td>
+                            <td>{}</td>
+                            <td><code class="font-mono path-chip" title="{}">{}</code></td>
+                            <td>{}</td>
+                            <td class="font-mono">{}</td>
+                            <td>
+                                <div style="display: flex; gap: 6px;">
+                                    <button class="btn btn-secondary btn-sm" onclick="copyDatasetPath('{}')">📋 Copy</button>
+                                    <button class="btn btn-secondary btn-sm" style="color: #ff5555; border-color: #331111;" onclick="unmountDataset('{}')">Unmount</button>
+                                </div>
+                            </td>
+                        </tr>"##,
+                        d.name,
+                        d.description,
+                        d.format.to_uppercase(),
+                        loc_badge,
+                        d.path,
+                        d.path,
+                        status_badge,
+                        split_str,
+                        d.path,
+                        d.name
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            format!(
+                r##"<div class="card" style="overflow-x: auto; margin-bottom: 24px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Dataset Name</th>
+                                <th>Format</th>
+                                <th>Mount Type</th>
+                                <th>Filesystem Path</th>
+                                <th>Status & Size</th>
+                                <th>Split</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="code-terminal" style="margin-top: 16px;">
+                    <div class="terminal-line"><span class="term-comment"># Accessing mounted datasets in your PyTorch recipes / Hydra configs:</span></div>
+                    <div class="terminal-line"><span class="term-cmd">from sentinel import get_dataset_path</span></div>
+                    <div class="terminal-line"><span class="term-prompt">&gt;&gt;&gt;</span> <span class="term-cmd">data_dir = get_dataset_path("cifar10")</span> <span class="term-comment"># Automatically resolves external disk or local path</span></div>
+                </div>"##,
+                rows
+            )
+        };
+
         format!(
             r###"<!DOCTYPE html>
 <html lang="en">
@@ -554,6 +650,57 @@ impl DashboardView {
             transition: all 0.15s ease;
         }}
         .ws-dropdown-action:hover {{ background: #222222; border-color: #444444; }}
+
+        /* DATASET BADGES & STYLES */
+        .badge-external {{
+            font-size: 10px;
+            font-weight: 600;
+            color: #60a5fa;
+            background: #111e33;
+            border: 1px solid #1e3a8a;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 0.05em;
+        }}
+        .badge-inrepo {{
+            font-size: 10px;
+            font-weight: 600;
+            color: #ededed;
+            background: #1c1c1c;
+            border: 1px solid #333333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 0.05em;
+        }}
+        .status-connected {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #ededed;
+        }}
+        .status-missing {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #f59e0b;
+        }}
+        .dot-green {{
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 6px #ffffff;
+        }}
+        .path-chip {{
+            background: #111111;
+            padding: 3px 6px;
+            border-radius: 4px;
+            border: 1px solid #222222;
+            font-size: 11px;
+            color: #a1a1a1;
+        }}
 
         /* SIDEBAR SECTIONS */
         .nav-section {{
@@ -1402,6 +1549,7 @@ impl DashboardView {
             <div class="nav-item" id="nav-datasets" onclick="switchTab('datasets')">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
                 <span>Datasets</span>
+                <span class="nav-badge" id="sidebar-datasets-badge">{datasets_count}</span>
             </div>
             <div class="nav-item" id="nav-machines" onclick="switchTab('machines')">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
@@ -1545,19 +1693,15 @@ impl DashboardView {
                 <div class="page-header">
                     <div>
                         <div class="category-eyebrow">DATA MANAGEMENT</div>
-                        <h1 class="page-title">Datasets</h1>
-                        <p class="page-subtitle">Local storage mounts and cloud object store links.</p>
+                        <h1 class="page-title">Datasets & Storage</h1>
+                        <p class="page-subtitle">External filesystem paths (NAS / NVMe), local dataset mounts, and training data inventory.</p>
                     </div>
+                    <button class="btn btn-primary" onclick="openMountDatasetModal()">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        <span>Mount dataset path</span>
+                    </button>
                 </div>
-                <div class="projects-empty-card">
-                    <div class="projects-empty-icon">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8">
-                            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-                        </svg>
-                    </div>
-                    <div class="projects-empty-title">No datasets mounted</div>
-                    <div class="projects-empty-desc">Connect datasets via local symlink or remote S3/GCS buckets to make them accessible to training recipes.</div>
-                </div>
+                {datasets_html}
             </section>
 
             <!-- TAB 6: MACHINES & HARDWARE -->
@@ -1701,6 +1845,53 @@ impl DashboardView {
                 <button class="btn-ghost" onclick="closeLogsModal()">✕</button>
             </div>
             <textarea id="logs-viewer" class="code-area" style="height: 400px; background: #000000; color: #ededed; border: 1px solid var(--border); border-radius: 6px;" readonly></textarea>
+        </div>
+    </div>
+
+    <!-- MOUNT DATASET MODAL -->
+    <div id="mount-dataset-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h3 style="font-size: 15px; font-weight: 600; color: #ffffff;">Mount Dataset (Local or External)</h3>
+                    <div class="font-mono" style="font-size: 11px; color: var(--text-muted);">Link an external disk directory, NVMe mount, or local data file</div>
+                </div>
+                <button class="btn-ghost" onclick="closeMountDatasetModal()">✕</button>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Dataset Name</label>
+                <input class="form-input" id="ds-name-input" placeholder="e.g. cifar10, imagenet, alpaca-tokens" />
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Unique identifier referenced in training recipes or code.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Filesystem Path (External or In-Repo)</label>
+                <input class="form-input font-mono" id="ds-path-input" placeholder="e.g. /mnt/nvme/data, ~/datasets/cifar10, or datasets/data.csv" />
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Can be any absolute path on this machine (outside the repo) or relative in-repo path.</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Data Format</label>
+                <select class="form-input font-mono" id="ds-format-input">
+                    <option value="folder">folder (ImageFolder / raw directory)</option>
+                    <option value="images">images (PNG / JPEG dataset)</option>
+                    <option value="parquet">parquet (Apache Parquet table)</option>
+                    <option value="csv">csv (Tabular / text data)</option>
+                    <option value="jsonl">jsonl (Tokenized LLM / instruction data)</option>
+                    <option value="huggingface">huggingface (HF Datasets cache)</option>
+                    <option value="archive">archive (Tar / Zip / HDF5)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Split (Optional)</label>
+                <input class="form-input font-mono" id="ds-split-input" placeholder="e.g. train, val, test" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Description (Optional)</label>
+                <input class="form-input" id="ds-desc-input" placeholder="e.g. Training split with 50k color images across 10 classes" />
+            </div>
+            <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn btn-secondary btn-sm" onclick="closeMountDatasetModal()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="submitDatasetMount()">Save Dataset Mount</button>
+            </div>
         </div>
     </div>
 
@@ -1976,6 +2167,51 @@ impl DashboardView {
             const dd = document.getElementById('workspace-dropdown');
             if (dd) dd.style.display = 'none';
         }});
+
+        function openMountDatasetModal() {{
+            document.getElementById('mount-dataset-modal').style.display = 'flex';
+        }}
+
+        function closeMountDatasetModal() {{
+            document.getElementById('mount-dataset-modal').style.display = 'none';
+        }}
+
+        function submitDatasetMount() {{
+            const name = document.getElementById('ds-name-input').value.trim();
+            const path = document.getElementById('ds-path-input').value.trim();
+            const format = document.getElementById('ds-format-input').value;
+            const split = document.getElementById('ds-split-input').value.trim();
+            const description = document.getElementById('ds-desc-input').value.trim();
+
+            if (!name || !path) {{
+                alert('Please enter both dataset name and path.');
+                return;
+            }}
+
+            fetch('/api/datasets', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ name, path, format, split: split || null, description }})
+            }})
+            .then(r => r.json())
+            .then(() => {{
+                alert('✨ Dataset mount saved: ' + name);
+                location.reload();
+            }})
+            .catch(e => alert('Failed to mount dataset: ' + e));
+        }}
+
+        function copyDatasetPath(path) {{
+            navigator.clipboard.writeText(path).then(() => alert('Copied dataset path: ' + path));
+        }}
+
+        function unmountDataset(name) {{
+            if (!confirm('Unmount dataset "' + name + '"? This removes the configuration link without deleting your files.')) return;
+            fetch('/api/datasets/' + encodeURIComponent(name), {{ method: 'DELETE' }})
+                .then(r => r.json())
+                .then(() => location.reload())
+                .catch(e => alert('Failed to unmount: ' + e));
+        }}
     </script>
 </body>
 </html>"###,
@@ -1991,6 +2227,8 @@ impl DashboardView {
             repo_alert_html = repo_alert_html,
             overview_templates_html = overview_templates_html,
             jobs_count = jobs.len(),
+            datasets_count = datasets.len(),
+            datasets_html = datasets_html,
             recent_run_html = recent_run_html,
             projects_html = projects_html,
             jobs_rows_html = jobs_rows_html,
@@ -2012,7 +2250,7 @@ mod tests {
     #[test]
     fn test_render_html_contains_critical_sections() {
         let state = DashboardState::new();
-        let html = DashboardView::render_html(&state, None, &[], &[]);
+        let html = DashboardView::render_html(&state, None, &[], &[], &[]);
 
         assert!(html.contains("sentinel"));
         assert!(html.contains("Workspace overview"));
@@ -2020,6 +2258,7 @@ mod tests {
         assert!(html.contains("Templates"));
         assert!(html.contains("Configure Recipe"));
         assert!(html.contains("No projects registered yet"));
+        assert!(html.contains("Datasets & Storage"));
         // Never contains demo run data
         assert!(!html.contains("job-Custom Command Runner"));
 
@@ -2031,9 +2270,17 @@ mod tests {
         // Once metrics/runs are visible: templates are hidden on Overview
         let dummy_spec = sentinel_core::models::JobSpec::new("active-training-experiment", sentinel_core::models::RunMode::Command);
         let dummy_job = sentinel_core::models::JobRecord::new(dummy_spec);
-        let html_with_metrics = DashboardView::render_html(&state, None, &[dummy_job], &[]);
+        let html_with_metrics = DashboardView::render_html(&state, None, &[dummy_job], &[], &[]);
         assert!(!html_with_metrics.contains("Choose a Recipe to Start Training"));
         assert!(html_with_metrics.contains("active-training-experiment"));
+
+        // Datasets rendering: supports both external disk mounts and local paths
+        let mut ds = DatasetSpec::new("cifar10", "/mnt/data/cifar10", "images");
+        ds.is_external = true;
+        let html_with_ds = DashboardView::render_html(&state, None, &[], &[], &[ds]);
+        assert!(html_with_ds.contains("cifar10"));
+        assert!(html_with_ds.contains("EXTERNAL MOUNT"));
+        assert!(html_with_ds.contains("/mnt/data/cifar10"));
 
         // If sentinel.lock does not exist, indicates not a sentinel repo
         if !state.is_sentinel_repo {

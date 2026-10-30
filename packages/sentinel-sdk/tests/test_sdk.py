@@ -71,6 +71,26 @@ def test_safe_tracking_never_crashes():
     # Must reach here without throwing
     print("✅ Safe tracking wrapper verified: 0 exceptions raised on bad input!")
 
+def test_get_dataset_path_resolution(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    
+    # 1. Test dataset in datasets.yaml
+    cfg = tmp_path / "datasets.yaml"
+    cfg.write_text("datasets:\n  - name: my_external_data\n    path: /tmp\n")
+    
+    resolved = sentinel.get_dataset_path("my_external_data")
+    assert resolved is not None
+    assert resolved == str(Path("/tmp").resolve())
+
+    # 2. Test in-repo datasets/ directory
+    (tmp_path / "datasets" / "local_split").mkdir(parents=True)
+    resolved_local = sentinel.get_dataset_path("local_split")
+    assert resolved_local is not None
+    assert "local_split" in resolved_local
+
+    # 3. Non-existent returns None
+    assert sentinel.get_dataset_path("non_existent_dataset_123") is None
+
 if __name__ == "__main__":
     test_sentinel_mlflow_end_to_end()
     test_safe_tracking_never_crashes()

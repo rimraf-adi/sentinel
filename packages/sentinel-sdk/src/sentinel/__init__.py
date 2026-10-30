@@ -217,3 +217,44 @@ def finish(status: str = "FINISHED"):
 def get_run() -> Optional[Run]:
     global _current_run
     return _current_run
+
+@_safe_call(default_return=None)
+def get_dataset_path(name: str) -> Optional[str]:
+    """Resolve a dataset path from datasets.yaml, sentinel.yaml, or local datasets/ directory.
+    
+    Supports external filesystem paths (e.g., /data/imagenet, ~/datasets/cifar10),
+    environment variables (e.g. $DATA_DIR), and in-repo paths.
+    """
+    import yaml
+    
+    # 1. Search configuration files
+    for config_name in ["datasets.yaml", "sentinel.yaml"]:
+        p = Path(config_name)
+        if p.exists():
+            try:
+                with open(p, "r") as f:
+                    data = yaml.safe_load(f) or {}
+                datasets = data.get("datasets", [])
+                if isinstance(datasets, list):
+                    for d in datasets:
+                        if isinstance(d, dict) and d.get("name") == name:
+                            raw_path = d.get("path", "")
+                            expanded = os.path.expanduser(os.path.expandvars(str(raw_path)))
+                            return str(Path(expanded).resolve())
+                elif isinstance(datasets, dict) and name in datasets:
+                    raw_path = datasets[name].get("path") if isinstance(datasets[name], dict) else datasets[name]
+                    expanded = os.path.expanduser(os.path.expandvars(str(raw_path)))
+                    return str(Path(expanded).resolve())
+            except Exception:
+                pass
+                
+    # 2. Check local repo datasets directory
+    local = Path("datasets") / name
+    if local.exists():
+        return str(local.resolve())
+
+    # Fallback if path itself exists
+    if Path(name).exists():
+        return str(Path(name).resolve())
+
+    return None

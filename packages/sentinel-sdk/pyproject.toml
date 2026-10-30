@@ -8,6 +8,12 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[dependency-groups]
+dev = [
+    "mlflow>=2.10.0",
+    "pytest>=7.0.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
