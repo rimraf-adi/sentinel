@@ -54,6 +54,12 @@ enum Commands {
         /// Project name
         name: String,
     },
+    /// Convert/initialize an existing directory into a Sentinel repository
+    Init {
+        /// Directory path (defaults to current directory ".")
+        #[arg(default_value = ".")]
+        path: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -196,6 +202,22 @@ async fn main() -> anyhow::Result<()> {
             println!("  sentinel template list");
             println!("  sentinel dev");
         }
+        Some(Commands::Init { path }) => {
+            let target_path = Path::new(&path);
+            let canonical = target_path.canonicalize().unwrap_or_else(|_| target_path.to_path_buf());
+            let project_name = canonical
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project");
+
+            println!("Initializing Sentinel in: {}", target_path.display());
+            ProjectScaffolder::init(target_path, project_name)?;
+            println!("✨ Successfully converted '{project_name}' into a Sentinel repository!");
+            println!("   Generated: sentinel.lock (lockfile), sentinel.yaml, and machines.yaml");
+            println!("\nNext steps:");
+            println!("   sentinel template list");
+            println!("   sentinel dev");
+        }
         None => {
             // Default run on port 2512
             run_dev(2512).await?;
@@ -228,6 +250,12 @@ async fn run_dev(port: u16) -> anyhow::Result<()> {
     println!("🚀 Sentinel Daemon active at http://localhost:{port}");
     println!("   API health: http://localhost:{port}/api/health");
     println!("   WebSocket telemetry: ws://localhost:{port}/ws/live");
+
+    let is_sentinel = Path::new("sentinel.lock").exists();
+    if !is_sentinel {
+        println!("⚠️  Workspace: 'sentinel.lock' not found (not a Sentinel repository).");
+        println!("   Run 'sentinel init' to initialize and convert this repository.");
+    }
     axum::serve(listener, app).await?;
     Ok(())
 }

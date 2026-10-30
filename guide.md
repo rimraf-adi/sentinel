@@ -24,8 +24,10 @@ When you (the agent) are operating within a Sentinel-powered repository, keep th
 When entering a new workspace, follow this discovery routine to detect if Sentinel is present:
 
 ```bash
-# 1. Check for Sentinel configuration or template directory
-test -f sentinel.yaml || test -d templates/ && echo "Sentinel codebase detected"
+# 1. Check for Sentinel lockfile or configuration
+test -f sentinel.lock && echo "Sentinel codebase detected (sentinel.lock present)"
+# If uninitialized, convert the repository in-place:
+# sentinel init
 
 # 2. Check if Sentinel CLI binary is available
 which sentinel || test -f target/debug/sentinel && echo "Sentinel binary found"

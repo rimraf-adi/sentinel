@@ -1,6 +1,7 @@
 //! HTML & WebAssembly Dashboard View Generator.
 //! IDE / Code view is strictly READ-ONLY. Everything else (configs, templates, jobs, sweeps) is EDITABLE.
 //! Minimalist, clean black-and-white theme inspired by Vercel (Geist Design System).
+//! Strictly blank when no data exists (no demo data). Identifies repository status via sentinel.lock.
 
 use crate::state::DashboardState;
 use sentinel_core::models::{HardwareStats, JobRecord};
@@ -11,11 +12,49 @@ pub struct DashboardView;
 impl DashboardView {
     /// Render complete standalone single-page dashboard HTML with Vercel black & white aesthetic.
     pub fn render_html(
-        _state: &DashboardState,
+        state: &DashboardState,
         stats: Option<&HardwareStats>,
         jobs: &[JobRecord],
         templates: &[Template],
     ) -> String {
+        let is_sentinel = state.is_sentinel_repo;
+        let workspace_name = if state.workspace_name.is_empty() {
+            "sentinel".to_string()
+        } else {
+            state.workspace_name.clone()
+        };
+        let workspace_path = if state.workspace_path.is_empty() {
+            "~/Documents/100xcode/sentinel".to_string()
+        } else {
+            state.workspace_path.clone()
+        };
+        let full_workspace_path = if state.full_workspace_path.is_empty() {
+            workspace_path.clone()
+        } else {
+            state.full_workspace_path.clone()
+        };
+        let git_branch = if state.git_branch.is_empty() {
+            "main".to_string()
+        } else {
+            state.git_branch.clone()
+        };
+        let monogram = if workspace_name.len() >= 2 {
+            workspace_name[..2].to_uppercase()
+        } else {
+            "SE".to_string()
+        };
+
+        let repo_type_label = if is_sentinel {
+            "Sentinel Lock Active".to_string()
+        } else {
+            "Not Initialized".to_string()
+        };
+        let git_status_label = if state.git_clean {
+            "Clean".to_string()
+        } else {
+            "Modified".to_string()
+        };
+
         let cpu_percent = stats.map(|s| s.cpu_util_percent).unwrap_or(0.0);
         let ram_gb_used = stats
             .map(|s| s.ram_used_bytes as f64 / (1024.0 * 1024.0 * 1024.0))
@@ -55,7 +94,7 @@ impl DashboardView {
             r##"<div class="card stat-card"><div class="stat-title">GPU Telemetry</div><div class="stat-value">Local Host</div><div class="stat-footer">Apple Silicon / CPU Worker Pool</div></div>"##.to_string()
         };
 
-        // Render Recent Run card (empty state if jobs is empty)
+        // Render Recent Run card (strictly blank if jobs is empty — never add demo data)
         let recent_run_html = if let Some(latest) = jobs.last() {
             let status_pill = match latest.status {
                 sentinel_core::models::JobStatus::Running => {
@@ -141,31 +180,57 @@ impl DashboardView {
                 latest.pid.unwrap_or(0)
             )
         } else {
-            // Empty state for Recent Run when no jobs exist
-            r##"<div class="recent-run-card">
-                <div class="recent-run-header">
-                    <div class="recent-run-title-group">
-                        <div class="recent-run-icon">
-                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            // Strictly blank when no runs have been executed — zero mock/demo data
+            String::new()
+        };
+
+        // Sentinel Lock Identification Alert
+        let repo_status_pill = if !is_sentinel {
+            r##"<div class="uninit-pill"><span class="dot-amber"></span> not a sentinel repo</div>"##.to_string()
+        } else if state.git_clean {
+            r##"<div class="clean-pill"><span class="dot"></span> clean</div>"##.to_string()
+        } else {
+            r##"<div class="clean-pill" style="color: #60a5fa;"><span class="dot" style="background: #3b82f6;"></span> modified</div>"##.to_string()
+        };
+
+        let top_status_pill = if is_sentinel {
+            r##"<div class="status-pill"><span class="dot-white" style="background: var(--accent); box-shadow: 0 0 6px var(--accent);"></span> daemon online</div>"##.to_string()
+        } else {
+            r##"<div class="status-pill status-pill-warning"><span class="dot-amber"></span> sentinel.lock missing</div>"##.to_string()
+        };
+
+        let repo_alert_html = if !is_sentinel {
+            format!(
+                r##"<div class="repo-alert-card">
+                    <div class="repo-alert-header">
+                        <div class="repo-alert-badge">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                            <span>NOT A SENTINEL REPOSITORY</span>
                         </div>
-                        <div>
-                            <div class="recent-run-label">Recent run</div>
-                            <div class="recent-run-id font-mono">&mdash;</div>
+                        <span class="repo-alert-lockfile font-mono">sentinel.lock not found</span>
+                    </div>
+                    <h3 class="repo-alert-title">This workspace has not been initialized with Sentinel</h3>
+                    <p class="repo-alert-desc">
+                        Identified using lock files: <code>sentinel.lock</code> was not found in <code>{}</code>.
+                        Sentinel uses lockfiles to guarantee reproducible environments, template inheritance, and tracking invariants.
+                    </p>
+                    <div class="repo-conversion-box">
+                        <div class="repo-conversion-label">Commands to convert this repository into a Sentinel repository:</div>
+                        <div class="code-terminal">
+                            <div class="terminal-line"><span class="term-prompt">$</span> <span class="term-cmd">sentinel init</span> <span class="term-comment"># Initializes sentinel.yaml & sentinel.lock in-place</span></div>
+                            <div class="terminal-line"><span class="term-prompt">$</span> <span class="term-cmd">sentinel template new my-recipe</span> <span class="term-comment"># Adds your first training recipe</span></div>
+                            <div class="terminal-line"><span class="term-prompt">$</span> <span class="term-cmd">sentinel dev</span> <span class="term-comment"># Launches operations console</span></div>
+                        </div>
+                        <div class="repo-conversion-actions">
+                            <button class="btn btn-primary btn-sm" onclick="initSentinelRepo()">⚡ Convert to Sentinel (sentinel init)</button>
+                            <button class="btn btn-secondary btn-sm" onclick="copyInitCommands()">📋 Copy Commands</button>
                         </div>
                     </div>
-                    <div class="recent-run-actions">
-                        <span class="pill-badge pill-idle"><span class="dot-idle"></span> Idle</span>
-                        <button class="btn-ghost" onclick="switchTab('runs')">All runs &rarr;</button>
-                    </div>
-                </div>
-                <div class="empty-state-box">
-                    <div class="empty-state-title">No training runs recorded</div>
-                    <div class="empty-state-desc">Launch your first model run from a curated recipe template or start a hyperparameter sweep.</div>
-                    <div style="margin-top: 16px;">
-                        <button class="btn btn-primary btn-sm" onclick="openTemplateSelector()">+ New run</button>
-                    </div>
-                </div>
-            </div>"##.to_string()
+                </div>"##,
+                workspace_path
+            )
+        } else {
+            String::new()
         };
 
         // Projects Section: Since data is not there, render clean empty state
@@ -412,7 +477,59 @@ impl DashboardView {
             color: #ededed;
             font-weight: 500;
         }}
+        .uninit-pill {{
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #f59e0b;
+            font-weight: 500;
+            font-size: 11px;
+        }}
         .dot {{ width: 5px; height: 5px; border-radius: 50%; background: #ffffff; }}
+        .dot-amber {{ width: 5px; height: 5px; border-radius: 50%; background: #f59e0b; }}
+
+        .workspace-card:hover {{
+            border-color: #333333;
+        }}
+        .workspace-dropdown {{
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            background: #111111;
+            border: 1px solid #2e2e2e;
+            border-radius: 8px;
+            padding: 12px;
+            z-index: 1000;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.85);
+            font-size: 12px;
+            text-align: left;
+        }}
+        .ws-dropdown-header {{ margin-bottom: 8px; }}
+        .ws-dropdown-title {{ font-weight: 600; color: #ffffff; font-size: 13px; }}
+        .ws-dropdown-path {{ font-size: 10px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; margin-top: 2px; }}
+        .ws-dropdown-divider {{ height: 1px; background: var(--border-subtle); margin: 8px 0; }}
+        .ws-dropdown-row {{ display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 11px; }}
+        .ws-dropdown-label {{ color: var(--text-muted); }}
+        .ws-dropdown-val {{ color: #ffffff; font-weight: 500; }}
+        .ws-dropdown-action {{
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #171717;
+            border: 1px solid #2e2e2e;
+            color: #ffffff;
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            margin-top: 8px;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }}
+        .ws-dropdown-action:hover {{ background: #222222; border-color: #444444; }}
 
         /* SIDEBAR SECTIONS */
         .nav-section {{
@@ -521,6 +638,10 @@ impl DashboardView {
             align-items: center;
             gap: 6px;
         }}
+        .status-pill-warning {{
+            border-color: #422e11;
+            color: #f59e0b;
+        }}
         .dot-white {{ width: 5px; height: 5px; border-radius: 50%; background: #ffffff; }}
         .user-avatar {{
             width: 26px;
@@ -540,6 +661,95 @@ impl DashboardView {
             padding: 28px 32px 48px;
             max-width: 1200px;
             width: 100%;
+        }}
+
+        /* REPO STATUS ALERT & TERMINAL */
+        .repo-alert-card {{
+            background: #0a0a0a;
+            border: 1px solid #332712;
+            border-left: 3px solid #f59e0b;
+            border-radius: 8px;
+            padding: 18px 20px;
+            margin-bottom: 24px;
+        }}
+        .repo-alert-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }}
+        .repo-alert-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #f59e0b;
+            background: #1a1309;
+            padding: 2px 8px;
+            border-radius: 4px;
+            border: 1px solid #422e11;
+            letter-spacing: 0.05em;
+        }}
+        .repo-alert-lockfile {{
+            font-size: 11px;
+            color: var(--text-muted);
+        }}
+        .repo-alert-title {{
+            font-size: 15px;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 6px;
+        }}
+        .repo-alert-desc {{
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+            line-height: 1.5;
+        }}
+        .repo-conversion-box {{
+            background: #000000;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px 14px;
+        }}
+        .repo-conversion-label {{
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }}
+        .code-terminal {{
+            background: #050505;
+            border: 1px solid #1a1a1a;
+            border-radius: 4px;
+            padding: 10px 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }}
+        .terminal-line {{
+            margin-bottom: 4px;
+        }}
+        .term-prompt {{
+            color: #666666;
+            margin-right: 6px;
+            user-select: none;
+        }}
+        .term-cmd {{
+            color: #ffffff;
+            font-weight: 600;
+        }}
+        .term-comment {{
+            color: #666666;
+            margin-left: 8px;
+        }}
+        .repo-conversion-actions {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }}
 
         /* PAGE HEADER */
@@ -760,21 +970,6 @@ impl DashboardView {
         }}
 
         /* EMPTY STATES */
-        .empty-state-box {{
-            padding: 16px 0 6px;
-            text-align: left;
-        }}
-        .empty-state-title {{
-            font-size: 14px;
-            font-weight: 600;
-            color: #ffffff;
-            margin-bottom: 4px;
-        }}
-        .empty-state-desc {{
-            font-size: 12px;
-            color: var(--text-muted);
-            max-width: 480px;
-        }}
         .projects-empty-card {{
             background: var(--surface);
             border: 1px dashed var(--border);
@@ -1108,23 +1303,49 @@ impl DashboardView {
         </div>
 
         <!-- WORKSPACE CARD -->
-        <div class="workspace-card">
+        <div class="workspace-card" onclick="toggleWorkspaceDropdown(event)" style="cursor: pointer; position: relative;" title="Click to view workspace details & actions">
             <div class="workspace-card-top">
-                <div class="workspace-monogram">UX</div>
+                <div class="workspace-monogram">{monogram}</div>
                 <div class="workspace-meta">
                     <div class="workspace-name">
-                        <span>uxML</span>
+                        <span>{workspace_name}</span>
                         <span style="font-size: 10px; color: var(--text-muted);">&or;</span>
                     </div>
-                    <div class="workspace-path">~/100xcode/uxML</div>
+                    <div class="workspace-path" title="{full_workspace_path}">{workspace_path}</div>
                 </div>
             </div>
             <div class="workspace-card-bottom">
                 <div class="branch-pill">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-                    <span>main</span>
+                    <span>{git_branch}</span>
                 </div>
-                <div class="clean-pill"><span class="dot"></span> clean</div>
+                {repo_status_pill}
+            </div>
+
+            <!-- WORKSPACE DETAILS DROPDOWN -->
+            <div id="workspace-dropdown" class="workspace-dropdown" style="display: none;">
+                <div class="ws-dropdown-header">
+                    <div class="ws-dropdown-title">{workspace_name}</div>
+                    <div class="ws-dropdown-path">{workspace_path}</div>
+                </div>
+                <div class="ws-dropdown-divider"></div>
+                <div class="ws-dropdown-row">
+                    <span class="ws-dropdown-label">Sentinel Lock:</span>
+                    <span class="ws-dropdown-val">{repo_type_label}</span>
+                </div>
+                <div class="ws-dropdown-row">
+                    <span class="ws-dropdown-label">Git Branch:</span>
+                    <span class="ws-dropdown-val font-mono">{git_branch}</span>
+                </div>
+                <div class="ws-dropdown-row">
+                    <span class="ws-dropdown-label">Working Tree:</span>
+                    <span class="ws-dropdown-val">{git_status_label}</span>
+                </div>
+                <div class="ws-dropdown-divider"></div>
+                <button class="ws-dropdown-action" onclick="initSentinelRepo(); event.stopPropagation();">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    <span>Re-sync Sentinel Lock</span>
+                </button>
             </div>
         </div>
 
@@ -1175,14 +1396,14 @@ impl DashboardView {
         <!-- TOP BREADCRUMB / STATUS BAR -->
         <header class="top-bar">
             <div class="breadcrumbs">
-                <span>uxML</span>
+                <span>{workspace_name}</span>
                 <span>/</span>
                 <span class="bc-current" id="top-breadcrumb">Overview</span>
             </div>
             <div class="top-status">
                 <div class="status-pill"><span class="dot-white"></span> UI prototype</div>
-                <div class="status-pill"><span class="dot-white"></span> daemon online</div>
-                <div class="user-avatar">AD</div>
+                {top_status_pill}
+                <div class="user-avatar">{monogram}</div>
             </div>
         </header>
 
@@ -1209,7 +1430,10 @@ impl DashboardView {
                     </div>
                 </div>
 
-                <!-- RECENT RUN CARD -->
+                <!-- NOT A SENTINEL REPO WARNING (IDENTIFIED VIA SENTINEL.LOCK) -->
+                {repo_alert_html}
+
+                <!-- RECENT RUN CARD (BLANK WHEN NO RUNS — NO DEMO DATA) -->
                 {recent_run_html}
 
                 <!-- PROJECTS SECTION -->
@@ -1697,9 +1921,47 @@ impl DashboardView {
             const code = document.getElementById('code-viewer').value;
             navigator.clipboard.writeText(code).then(() => alert('Copied code to clipboard!'));
         }}
+
+        function initSentinelRepo() {{
+            fetch('/api/repo/init', {{ method: 'POST' }})
+                .then(r => r.json())
+                .then(data => {{
+                    alert('✨ ' + data.message + '\nCreated sentinel.lock, sentinel.yaml, and machines.yaml.');
+                    location.reload();
+                }})
+                .catch(e => alert('Failed to initialize: ' + e));
+        }}
+
+        function copyInitCommands() {{
+            const cmds = "sentinel init\nsentinel template new my-recipe\nsentinel dev";
+            navigator.clipboard.writeText(cmds).then(() => alert('Copied commands to clipboard!'));
+        }}
+
+        function toggleWorkspaceDropdown(e) {{
+            e.stopPropagation();
+            const dd = document.getElementById('workspace-dropdown');
+            if (dd) {{
+                dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+            }}
+        }}
+
+        document.addEventListener('click', () => {{
+            const dd = document.getElementById('workspace-dropdown');
+            if (dd) dd.style.display = 'none';
+        }});
     </script>
 </body>
 </html>"###,
+            workspace_name = workspace_name,
+            workspace_path = workspace_path,
+            full_workspace_path = full_workspace_path,
+            git_branch = git_branch,
+            repo_type_label = repo_type_label,
+            git_status_label = git_status_label,
+            monogram = monogram,
+            repo_status_pill = repo_status_pill,
+            top_status_pill = top_status_pill,
+            repo_alert_html = repo_alert_html,
             jobs_count = jobs.len(),
             recent_run_html = recent_run_html,
             projects_html = projects_html,
@@ -1730,6 +1992,13 @@ mod tests {
         assert!(html.contains("Templates"));
         assert!(html.contains("Configure Recipe"));
         assert!(html.contains("No projects registered yet"));
-        assert!(html.contains("No training runs recorded"));
+        // Never contains demo run data
+        assert!(!html.contains("job-Custom Command Runner"));
+
+        // If sentinel.lock does not exist, indicates not a sentinel repo
+        if !state.is_sentinel_repo {
+            assert!(html.contains("sentinel.lock"));
+            assert!(html.contains("sentinel init"));
+        }
     }
 }

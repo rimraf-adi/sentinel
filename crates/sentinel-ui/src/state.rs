@@ -16,6 +16,12 @@ pub struct DashboardState {
     pub mode: DashboardMode,
     pub active_tab: String,
     pub is_connected: bool,
+    pub is_sentinel_repo: bool,
+    pub workspace_name: String,
+    pub workspace_path: String,
+    pub full_workspace_path: String,
+    pub git_branch: String,
+    pub git_clean: bool,
     pub idle_timeout_secs: u64,
     #[serde(skip)]
     pub last_interaction: Option<Instant>,
@@ -29,13 +35,66 @@ impl Default for DashboardState {
 
 impl DashboardState {
     pub fn new() -> Self {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let canonical = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+
+        let is_sentinel = canonical.join("sentinel.lock").exists()
+            || std::path::Path::new("sentinel.lock").exists();
+
+        // 1. Resolve project name: check sentinel.yaml first, then fallback to directory name
+        let name = if let Ok(content) = std::fs::read_to_string(canonical.join("sentinel.yaml")) {
+            content
+                .lines()
+                .find_map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("project_name:") {
+                        let val = trimmed.trim_start_matches("project_name:").trim();
+                        Some(val.trim_matches('"').trim_matches('\'').to_string())
+                    } else {
+                        None
+                    }
+                })
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    canonical
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("workspace")
+                        .to_string()
+                })
+        } else {
+            canonical
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("workspace")
+                .to_string()
+        };
+
+        // 2. Shorten path with ~
+        let short_path = shorten_path(&canonical);
+        let full_path = canonical.to_string_lossy().to_string();
+
+        // 3. Detect git branch & status
+        let (git_branch, git_clean) = detect_git(&canonical);
+
         Self {
             mode: DashboardMode::ReadOnly,
             active_tab: "overview".to_string(),
             is_connected: false,
+            is_sentinel_repo: is_sentinel,
+            workspace_name: name,
+            workspace_path: short_path,
+            full_workspace_path: full_path,
+            git_branch,
+            git_clean,
             idle_timeout_secs: 15,
             last_interaction: Some(Instant::now()),
         }
+    }
+
+    pub fn with_sentinel_repo(mut self, is_sentinel: bool) -> Self {
+        self.is_sentinel_repo = is_sentinel;
+        self
     }
 
     /// User interacted (clicked edit, entered input).
@@ -85,6 +144,46 @@ impl DashboardState {
             DashboardMode::Idle => Duration::from_millis(5000), // Sleepy mode: 5s
         }
     }
+}
+
+/// Shorten an absolute path using ~ if inside home directory
+pub fn shorten_path(path: &std::path::Path) -> String {
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+        if let Ok(suffix) = path.strip_prefix(&home) {
+            return format!("~/{}", suffix.display());
+        }
+    }
+    path.to_string_lossy().to_string()
+}
+
+/// Dynamically detect current git branch and working directory clean status
+pub fn detect_git(cwd: &std::path::Path) -> (String, bool) {
+    let head_path = cwd.join(".git/HEAD");
+    let branch = if head_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&head_path) {
+            let trimmed = content.trim();
+            if let Some(b) = trimmed.strip_prefix("ref: refs/heads/") {
+                b.to_string()
+            } else if trimmed.len() >= 7 {
+                trimmed[..7].to_string()
+            } else {
+                "main".to_string()
+            }
+        } else {
+            "main".to_string()
+        }
+    } else {
+        "main".to_string()
+    };
+
+    let clean = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(cwd)
+        .output()
+        .map(|o| o.stdout.is_empty())
+        .unwrap_or(true);
+
+    (branch, clean)
 }
 
 #[cfg(test)]

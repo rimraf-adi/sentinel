@@ -44,6 +44,8 @@ impl Server {
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
             .route("/api/templates", get(list_templates))
+            .route("/api/repo/status", get(get_repo_status))
+            .route("/api/repo/init", post(init_repo))
             .route("/api/files", get(list_files))
             .route("/api/files/content", get(get_file_content))
             .route("/ws/live", get(ws_handler))
@@ -299,4 +301,46 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             }
         }
     }
+}
+
+async fn get_repo_status() -> impl IntoResponse {
+    let ui_state = sentinel_ui::DashboardState::new();
+    let lock_found = ui_state.is_sentinel_repo;
+
+    Json(json!({
+        "is_sentinel_repo": lock_found,
+        "lock_file_found": lock_found,
+        "lock_file_path": "sentinel.lock",
+        "workspace_name": ui_state.workspace_name,
+        "workspace_path": ui_state.workspace_path,
+        "full_workspace_path": ui_state.full_workspace_path,
+        "git_branch": ui_state.git_branch,
+        "git_clean": ui_state.git_clean,
+        "convert_commands": [
+            "sentinel init",
+            "sentinel template new my-recipe",
+            "sentinel dev"
+        ]
+    }))
+}
+
+async fn init_repo() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let canonical = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+    let name = canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
+
+    sentinel_core::scaffold::ProjectScaffolder::init(&canonical, name).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to initialize Sentinel repository: {e}"),
+        )
+    })?;
+
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Repository successfully converted to Sentinel repository."
+    })))
 }

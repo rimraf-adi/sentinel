@@ -200,6 +200,89 @@ locked:
 
         Ok(())
     }
+
+    /// Check whether a directory is an initialized Sentinel repository (identifies by `sentinel.lock`).
+    pub fn is_sentinel_repo(path: &Path) -> bool {
+        path.join("sentinel.lock").exists()
+    }
+
+    /// Convert/initialize an existing directory into a Sentinel repository in-place
+    /// without overwriting existing user files.
+    pub fn init(target_dir: &Path, project_name: &str) -> anyhow::Result<()> {
+        fs::create_dir_all(target_dir)?;
+
+        let subdirs = [
+            "configs",
+            "models",
+            "datasets",
+            "templates/custom",
+            "hooks",
+        ];
+        for sub in &subdirs {
+            let _ = fs::create_dir_all(target_dir.join(sub));
+        }
+
+        // 1. Write sentinel.yaml if it does not already exist
+        let yaml_path = target_dir.join("sentinel.yaml");
+        if !yaml_path.exists() {
+            let sentinel_yaml = format!(
+                r#"# Sentinel Project Configuration
+schema_version: "1.0"
+project_name: "{project_name}"
+version: "0.1.0"
+
+defaults:
+  framework: "pytorch"
+  tracking_backend: "mlflow"
+  precision: "16-mixed"
+
+runner:
+  default_backend: "local"
+  gpus: "auto"
+"#
+            );
+            fs::write(yaml_path, sentinel_yaml)?;
+        }
+
+        // 2. Write sentinel.lock (The Machine-Managed Identifier Lockfile)
+        let lock_path = target_dir.join("sentinel.lock");
+        if !lock_path.exists() {
+            let sentinel_lock = format!(
+                r#"# Sentinel Machine Lockfile (Auto-generated)
+tool_version: "0.1.0"
+template_id: "custom/starter@v1"
+template_version: 1
+created_at: "{}"
+answers:
+  framework: "pytorch"
+  package_manager: "uv"
+  tracking: "mlflow"
+files:
+  sentinel.yaml: {{ owner: "managed" }}
+  sentinel.lock: {{ owner: "managed" }}
+"#,
+                chrono::Utc::now().to_rfc3339()
+            );
+            fs::write(lock_path, sentinel_lock)?;
+        }
+
+        // 3. Write machines.yaml if missing
+        let machines_path = target_dir.join("machines.yaml");
+        if !machines_path.exists() {
+            let machines_yaml = r#"# Machine Definitions (Local & Remote SSH)
+machines:
+  - id: "local"
+    name: "Local Workstation"
+    host: "127.0.0.1"
+    port: 2512
+    is_local: true
+    gpus: "auto"
+"#;
+            fs::write(machines_path, machines_yaml)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -234,6 +317,26 @@ mod tests {
         let parsed_base: serde_yaml::Value =
             serde_yaml::from_str(&base_content).expect("parse base.yaml");
         assert!(parsed_base["training"]["lr"].as_f64().is_some());
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_is_sentinel_repo_and_init() {
+        let temp_dir = std::env::temp_dir().join(format!("sentinel_init_test_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Initially, sentinel.lock does not exist
+        assert!(!ProjectScaffolder::is_sentinel_repo(&temp_dir));
+
+        // 2. Initialize in-place
+        ProjectScaffolder::init(&temp_dir, "my-existing-project").expect("init repo");
+
+        // 3. Now sentinel.lock exists and is recognized as a Sentinel repo
+        assert!(ProjectScaffolder::is_sentinel_repo(&temp_dir));
+        assert!(temp_dir.join("sentinel.lock").exists());
+        assert!(temp_dir.join("sentinel.yaml").exists());
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

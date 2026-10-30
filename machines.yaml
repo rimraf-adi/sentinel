@@ -1,0 +1,8 @@
+# Machine Definitions (Local & Remote SSH)
+machines:
+  - id: "local"
+    name: "Local Workstation"
+    host: "127.0.0.1"
+    port: 2512
+    is_local: true
+    gpus: "auto"

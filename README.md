@@ -101,8 +101,11 @@ Sentinel addresses these structural bottlenecks through an asynchronous, bifurca
 The platform is structured as a Cargo multi-crate workspace accompanied by a root Python workspace managed via `uv`:
 
 ```
-uxML/
+sentinel/
 ├── Cargo.toml                       # Workspace manifest defining Rust members and dependencies
+├── sentinel.lock                    # Machine-managed lockfile (tool version, templates & invariants)
+├── sentinel.yaml                    # Workspace Sentinel configuration (project name, defaults, runners)
+├── machines.yaml                    # Machine & worker node inventory (local & remote SSH)
 ├── pyproject.toml                   # Root Python project specification (uv workspace mode)
 ├── uv.lock                          # Cryptographically pinned Python dependencies
 ├── sentinel.md                      # Technical specifications and architectural design document
@@ -188,6 +191,7 @@ Usage: sentinel <COMMAND>
 
 Commands:
   dev       Start daemon and launch the low-overhead Web UI [default port: 2512]
+  init      Convert/initialize an existing directory into a Sentinel repository
   new       Scaffold a new project repository with conventions and configs
   run       Run a training job from a template or config
   sweep     Launch Optuna ASHA hyperparameter sweep

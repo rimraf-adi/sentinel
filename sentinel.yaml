@@ -1,0 +1,13 @@
+# Sentinel Project Configuration
+schema_version: "1.0"
+project_name: "sentinel"
+version: "0.1.0"
+
+defaults:
+  framework: "pytorch"
+  tracking_backend: "mlflow"
+  precision: "16-mixed"
+
+runner:
+  default_backend: "local"
+  gpus: "auto"
