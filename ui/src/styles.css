@@ -244,3 +244,9 @@ th { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em;
 .inner-row { display: flex; align-items: center; gap: 7px; padding: 2px 0; font-size: 11px; }
 .inner-row .muted { color: var(--text-muted); } .inner-row .shape { margin-left: auto; color: var(--text-muted); font-size: 10px; }
 .tier-dot { width: 7px; height: 7px; border-radius: 2px; background: var(--text-muted); flex-shrink: 0; } .tier-dot.compound { background: var(--accent-soft); border-radius: 50%; }
+
+/* model statistics */
+.bd-stats { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; padding: 6px 12px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); font-size: 12px; color: var(--text-secondary); }
+.bd-stats b { color: var(--text); font-variant-numeric: tabular-nums; } .bd-stats i { font-style: normal; color: var(--text-muted); } .bd-stats .muted { color: var(--text-muted); }
+.bnode .pcount { font: 600 10px var(--mono); color: var(--accent-soft); padding: 0 10px 4px; margin-top: -2px; }
+.inner-row .pc { color: var(--accent-soft); font-size: 10px; }

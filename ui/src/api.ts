@@ -89,6 +89,7 @@ export interface Component {
   locked: Record<string, unknown>;
   graph?: unknown;
   gan?: unknown;
+  stats?: { params: number; bytes_fp32: number; macs?: number | null; blocks?: number; compounds?: number; depth?: number };
 }
 export interface Dataset {
   name: string;
@@ -167,7 +168,15 @@ export interface Training {
   batch_size?: number | null;
   data: { csv: string; features: string[]; target: string; reshape?: number[] | null; test_split?: number; seed?: number };
 }
+export interface NodeStats { params: number; macs: number | null; shared: boolean; inner: GraphStats | null }
+export interface GraphStats {
+  params: number; bytes_fp32: number; macs: number | null; blocks: number; compounds: number; depth: number;
+  by_block: Record<string, number>; by_node: Record<string, NodeStats>;
+}
 export interface NodeDesc {
+  params: number;
+  macs: number | null;
+  shared: boolean;
   block: string;
   tier: 'fundamental' | 'compound';
   inputs: Record<string, string>;
@@ -183,6 +192,7 @@ export interface ValidateOk {
   nodes: Record<string, NodeDesc>;
   outputs: Record<string, string>;
   trainable: boolean;
+  stats: GraphStats;
   spec: GraphSpec;
   params: Record<string, Record<string, unknown>>;
 }

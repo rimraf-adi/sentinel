@@ -65,6 +65,9 @@ export function StatusPill({ status }: { status: JobStatus }) {
   return <span className="pill"><span className={'dot ' + s.dot} />{s.label}</span>;
 }
 
+/** 1234 -> 1.2k, 4_200_000 -> 4.2M */
+export const fmtCount = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+export const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(0.1, n / 1024).toFixed(1)} KB`);
 export const fmtGB = (b: number) => (b / 1024 ** 3).toFixed(2);
 export const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
 

@@ -227,7 +227,79 @@ pub struct ValidatedGraph {
     pub outputs: BTreeMap<String, Source>,
 }
 
+/// Size and compute of a validated graph, recursively through compound blocks.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct GraphStats {
+    /// Learnable parameters; nodes that share weights with another node count once.
+    pub params: u64,
+    /// Parameter memory in float32.
+    pub bytes_fp32: u64,
+    /// Multiply-accumulates per sample in matrix/convolution layers; None if some size is symbolic.
+    pub macs: Option<u64>,
+    /// Fundamental block instances, including those inside compound blocks.
+    pub blocks: usize,
+    /// Compound block instances at every level.
+    pub compounds: usize,
+    /// Levels of compound nesting (0 = only fundamental blocks).
+    pub depth: usize,
+    /// Parameters by fundamental block type: where the weights live.
+    pub by_block: BTreeMap<String, u64>,
+    pub by_node: BTreeMap<String, NodeStats>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct NodeStats {
+    pub params: u64,
+    pub macs: Option<u64>,
+    /// Reuses another node's weights (its parameters are counted there).
+    pub shared: bool,
+    pub inner: Option<Box<GraphStats>>,
+}
+
 impl ValidatedGraph {
+    /// Parameter counts, memory and MACs for the whole graph and every node.
+    pub fn stats(&self) -> GraphStats {
+        let mut st = GraphStats { macs: Some(0), ..Default::default() };
+        for node in &self.order {
+            let kind = &self.kinds[node];
+            let shared = self.spec.nodes[node].share.is_some();
+            let ins: BTreeMap<String, Shape> = kind.inputs().into_iter().map(|p| { let sh = self.shapes[&self.wires[&(node.clone(), p.clone())].key()].clone(); (p, sh) }).collect();
+            let outs: BTreeMap<String, Shape> = kind.outputs().into_iter().map(|p| { let sh = self.shapes[&format!("{node}.{p}")].clone(); (p, sh) }).collect();
+            let params = &self.params[node];
+            let mut ns = NodeStats { shared, ..Default::default() };
+            match kind {
+                BlockKind::Fundamental(b) => {
+                    ns.params = if shared { 0 } else { b.param_count(params, &ins) };
+                    ns.macs = b.macs(params, &ins, &outs);
+                    st.blocks += 1;
+                    *st.by_block.entry(b.name().to_string()).or_default() += ns.params;
+                }
+                BlockKind::Compound(_) => {
+                    let inner = self.compounds[node].stats();
+                    ns.params = if shared { 0 } else { inner.params };
+                    ns.macs = inner.macs;
+                    st.blocks += inner.blocks;
+                    st.compounds += 1 + inner.compounds;
+                    st.depth = st.depth.max(1 + inner.depth);
+                    if !shared {
+                        for (k, v) in &inner.by_block {
+                            *st.by_block.entry(k.clone()).or_default() += v;
+                        }
+                    }
+                    ns.inner = Some(Box::new(inner));
+                }
+            }
+            st.params += ns.params;
+            st.macs = match (st.macs, ns.macs) {
+                (Some(a), Some(b)) => Some(a + b),
+                _ => None,
+            };
+            st.by_node.insert(node.clone(), ns);
+        }
+        st.bytes_fp32 = st.params * 4;
+        st
+    }
+
     pub fn kind(&self, node: &str) -> &BlockKind {
         &self.kinds[node]
     }

@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { BlockNode as BN, Ctx, InputNode, OutputNode } from './types';
 import { shapeText } from './convert';
+import { fmtCount } from '../ui';
 
 export const BuilderCtx = createContext<Ctx>({ blocks: {}, result: null, errorNode: null });
 
@@ -19,6 +20,7 @@ export function BlockNodeView({ id, data, selected }: NodeProps<BN>) {
   return (
     <div className={'bnode' + (info.tier === 'compound' ? ' compound' : '') + (selected ? ' selected' : '') + (errorNode === id ? ' bad' : '')} style={{ ['--fam' as string]: `var(--fam-${info.family})` }}>
       <div className="bnode-h"><b>{id}</b><span>{info.tier === 'compound' ? '◆ ' : ''}{data.block}{data.share ? ` ⇢ ${data.share}` : ''}</span></div>
+      {r && (r.params > 0 || r.shared) && <div className="pcount" title={r.shared ? 'reuses another node\'s weights' : `${r.params.toLocaleString()} parameters`}>{r.shared ? 'shared weights' : `${fmtCount(r.params)} params`}</div>}
       <div className="bnode-b">
         <div>
           {info.inputs.map((p) => (

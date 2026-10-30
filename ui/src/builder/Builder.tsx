@@ -5,7 +5,7 @@ import {
 } from '@xyflow/react';
 import { api, type BlockInfo, type Component, type ValidateOk } from '../api';
 import { Icon } from '../icons';
-import { Modal, useToast } from '../ui';
+import { Modal, fmtBytes, fmtCount, useToast } from '../ui';
 import { BlockNodeView, BuilderCtx, InputNodeView, OutputNodeView } from './BlockNode';
 import { IDENT, emptyGraph, fromSpec, toSpec, wouldCycle } from './convert';
 import { Inspector } from './Inspector';
@@ -272,6 +272,16 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
         <button className="btn primary" onClick={run} disabled={!hasBlocks}>Run</button>
         <div className={'bd-status ' + status.kind} title={status.text}>{status.text}</div>
       </div>
+      {result?.stats && (
+        <div className="bd-stats" role="status" aria-label="Model size">
+          <span><b>{fmtCount(result.stats.params)}</b> parameters <i title={`${result.stats.params.toLocaleString()} exactly`}>· {fmtBytes(result.stats.bytes_fp32)}</i></span>
+          <span><b>{result.stats.macs === null ? 'n/a' : fmtCount(result.stats.macs)}</b> MACs/sample</span>
+          <span><b>{result.stats.blocks}</b> blocks</span>
+          <span><b>{result.stats.compounds}</b> compound</span>
+          <span><b>{result.stats.depth}</b> level{result.stats.depth === 1 ? '' : 's'} deep</span>
+          {Object.entries(result.stats.by_block).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => <span key={k} className="muted">{k} {Math.round((v / Math.max(1, result.stats.params)) * 100)}%</span>)}
+        </div>
+      )}
       <div className="bd-main">
         <div className="bd-side">
           <div className="tier-tabs" role="tablist" aria-label="Block tier">

@@ -121,6 +121,28 @@ training}`), both built from the same block hierarchy, with two optimizers and a
 
 Predictions run in a short-lived Python process, so the daemon itself never loads PyTorch; batch size is free.
 
+## Model statistics
+
+Every model reports its size before you train it: learnable **parameters** (per node, per compound block, and in total, with
+weight sharing counted once), memory as float32, **MACs per sample** in the matrix and convolution layers, how deep the block
+hierarchy goes, and which block types hold the weights.
+
+```
+$ sentinel component show vision/vit-tiny@v1
+...
+MODEL
+  parameters   112,906 (441.0 KB as float32)
+  compute      1.39 MMACs per sample (matrix and convolution layers)
+  structure    24 fundamental blocks · 4 compound blocks · 2 level(s) of nesting
+  weights in   linear 30% · attention 29% · positional_encoding 29% · patch_embed 11% · layernorm 1%
+```
+
+The counts are computed analytically from shapes, and the test suite checks them against PyTorch: parameter counts equal
+`sum(p.numel())` for every shipped component and every parameterised block (including multi-layer bidirectional LSTM/GRU, GAT and
+transformer layers), and MACs equal PyTorch's FLOP counter (as 2 x MACs) on MLP, CNN, ResNet and U-Net models. In the Builder
+the same numbers appear in a live bar, as a badge on each node, and in the inspector; component cards show the size of the
+default configuration; and each training run records `n_params`.
+
 ## Footprint
 
 Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with

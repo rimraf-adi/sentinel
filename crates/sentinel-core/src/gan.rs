@@ -101,9 +101,12 @@ opt_g = torch.optim.Adam(G.parameters(), lr={lr_g}, betas=({beta1}, 0.999))
 opt_d = torch.optim.Adam(D.parameters(), lr={lr_d}, betas=({beta1}, 0.999))
 bce = nn.BCEWithLogitsLoss()
 
+N_PARAMS = sum(p.numel() for p in G.parameters()) + sum(p.numel() for p in D.parameters())
+print(f"generator + discriminator: {{N_PARAMS:,}} parameters", flush=True)
+
 try:
     import sentinel
-    sentinel.init(run_name={id:?}, config=json.loads({cfg:?}))
+    sentinel.init(run_name={id:?}, config={{**json.loads({cfg:?}), "n_params": N_PARAMS}})
 except Exception:
     sentinel = None
 
@@ -158,7 +161,7 @@ except Exception as _e:
 with open(_art / "meta.json", "w") as _f:
     json.dump({{
         "graph": {id:?}, "task": "gan", "features": [{feats}], "target": None, "classes": None, "latent": LATENT,
-        "input_shape": [LATENT], "loss": "gan", "test_mean_gap": mean_gap, "test_std_gap": std_gap,
+        "input_shape": [LATENT], "loss": "gan", "n_params": N_PARAMS, "test_mean_gap": mean_gap, "test_std_gap": std_gap,
         "torch": torch.__version__, "files": _files,
     }}, _f, indent=2)
 shutil.copyfile(__file__, _art / "train.py")

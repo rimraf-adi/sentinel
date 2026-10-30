@@ -782,6 +782,146 @@ impl Block {
         }
     }
 
+    /// Learnable parameters of this block for the given resolved params and input shapes. Matches
+    /// `sum(p.numel() for p in module.parameters())` of the generated PyTorch module (buffers such as batch-norm running
+    /// statistics are not parameters).
+    pub fn param_count(&self, p: &Params, ins: &BTreeMap<String, Shape>) -> u64 {
+        let first = ins.get("in").or_else(|| ins.get("x"));
+        let last = |s: Option<&Shape>| -> u64 {
+            match s.and_then(|s| s.last()) {
+                Some(Dim::Const(n)) => *n as u64,
+                _ => 0,
+            }
+        };
+        let chan = |s: Option<&Shape>| -> u64 {
+            match s.and_then(|s| s.get(1)) {
+                Some(Dim::Const(n)) => *n as u64,
+                _ => 0,
+            }
+        };
+        let (i, o) = (last(first), geti(p, "out") as u64);
+        let h = geti(p, "hidden") as u64;
+        let k = geti(p, "kernel") as u64;
+        match self {
+            Block::Linear => i * o + if getb(p, "bias") { o } else { 0 },
+            Block::Gcn => i * o + o,
+            Block::LayerNorm => 2 * i,
+            Block::BatchNorm => 2 * chan(first),
+            Block::Lstm | Block::Gru => {
+                let gates = if *self == Block::Lstm { 4 } else { 3 };
+                let dirs = if getb(p, "bidirectional") { 2 } else { 1 };
+                let mut total = 0;
+                for layer in 0..geti(p, "layers") as u64 {
+                    let inp = if layer == 0 { i } else { h * dirs };
+                    total += dirs * (gates * h * inp + gates * h * h + 2 * gates * h);
+                }
+                total
+            }
+            Block::Conv1d => {
+                let oc = geti(p, "out_channels") as u64;
+                oc * chan(first) * k + oc
+            }
+            Block::Conv2d => {
+                let oc = geti(p, "out_channels") as u64;
+                oc * chan(first) * k * k + oc
+            }
+            Block::ConvTranspose2d => {
+                let oc = geti(p, "out_channels") as u64;
+                chan(first) * oc * k * k + oc
+            }
+            Block::Embedding => geti(p, "num_embeddings") as u64 * geti(p, "dim") as u64,
+            Block::Attention => 4 * i * i + 4 * i,
+            Block::TransformerEncoder => {
+                let ff = geti(p, "ff") as u64;
+                4 * i * i + 4 * i + 2 * i * ff + ff + i + 4 * i
+            }
+            Block::PatchEmbed => {
+                let (d, pt) = (geti(p, "dim") as u64, geti(p, "patch") as u64);
+                d * chan(first) * pt * pt + d
+            }
+            Block::ClsToken => i,
+            Block::PositionalEncoding => if gets(p, "kind") == "learned" { geti(p, "max_len") as u64 * i } else { 0 },
+            Block::Gat => {
+                let (hd, od) = (geti(p, "heads") as u64, geti(p, "out") as u64);
+                i * hd * od + 2 * hd * od
+            }
+            Block::Activation | Block::Dropout | Block::Add | Block::Concat | Block::MaxPool2d | Block::AvgPool2d | Block::GlobalAvgPool | Block::Flatten
+            | Block::Reshape | Block::Upsample | Block::MeanPool | Block::LastStep | Block::ClsSelect | Block::Sampling => 0,
+        }
+    }
+
+    /// Multiply-accumulates per sample (the batch dimension is excluded) in the matrix and convolution layers, where
+    /// nearly all compute lives; element-wise operations are not counted. `None` when a needed size is symbolic.
+    pub fn macs(&self, p: &Params, ins: &BTreeMap<String, Shape>, outs: &BTreeMap<String, Shape>) -> Option<u64> {
+        let first = ins.get("in").or_else(|| ins.get("x"));
+        let c = |s: &Shape, i: usize| -> Option<u64> {
+            match s.get(i) {
+                Some(Dim::Const(n)) => Some(*n as u64),
+                _ => None,
+            }
+        };
+        // product of the dims after the batch dim up to (not including) the last
+        let rows = |s: &Shape| -> Option<u64> { (1..s.len().saturating_sub(1)).try_fold(1u64, |a, i| Some(a * c(s, i)?)) };
+        let out = outs.get("out");
+        match self {
+            Block::Linear | Block::Gcn => {
+                let x = first?;
+                let n = rows(x)?;
+                let (i, o) = (c(x, x.len() - 1)?, geti(p, "out") as u64);
+                let mut m = n * i * o;
+                if *self == Block::Gcn {
+                    m += n * n * o; // adj @ (x W)
+                }
+                Some(m)
+            }
+            Block::Conv1d => {
+                let (x, y) = (first?, out?);
+                Some(c(y, 2)? * c(y, 1)? * c(x, 1)? * geti(p, "kernel") as u64)
+            }
+            Block::Conv2d => {
+                let (x, y) = (first?, out?);
+                Some(c(y, 2)? * c(y, 3)? * c(y, 1)? * c(x, 1)? * (geti(p, "kernel") * geti(p, "kernel")) as u64)
+            }
+            Block::ConvTranspose2d => {
+                let (x, y) = (first?, out?);
+                Some(c(x, 2)? * c(x, 3)? * c(x, 1)? * c(y, 1)? * (geti(p, "kernel") * geti(p, "kernel")) as u64)
+            }
+            Block::PatchEmbed => {
+                let (x, y) = (first?, out?);
+                Some(c(y, 1)? * c(y, 2)? * c(x, 1)? * (geti(p, "patch") * geti(p, "patch")) as u64)
+            }
+            Block::Lstm | Block::Gru => {
+                let x = first?;
+                let (t, f) = (c(x, 1)?, c(x, 2)?);
+                let gates = if *self == Block::Lstm { 4 } else { 3 };
+                let h = geti(p, "hidden") as u64;
+                let dirs = if getb(p, "bidirectional") { 2 } else { 1 };
+                let mut per_step = 0;
+                for layer in 0..geti(p, "layers") as u64 {
+                    let inp = if layer == 0 { f } else { h * dirs };
+                    per_step += dirs * gates * h * (inp + h);
+                }
+                Some(t * per_step)
+            }
+            Block::Attention | Block::TransformerEncoder => {
+                let x = first?;
+                let (t, e) = (c(x, 1)?, c(x, 2)?);
+                let mut m = 4 * t * e * e + 2 * t * t * e;
+                if *self == Block::TransformerEncoder {
+                    m += 2 * t * e * geti(p, "ff") as u64;
+                }
+                Some(m)
+            }
+            Block::Gat => {
+                let x = first?;
+                let (n, f) = (c(x, 1)?, c(x, 2)?);
+                let (hd, od) = (geti(p, "heads") as u64, geti(p, "out") as u64);
+                Some(n * f * hd * od + n * n * hd * od)
+            }
+            _ => Some(0),
+        }
+    }
+
     /// Blocks that are not a stock `torch.nn` layer need a small helper class in the generated code:
     /// `(class name, Python source)`. Code generation emits each one once.
     pub fn helper(&self) -> Option<(&'static str, &'static str)> {

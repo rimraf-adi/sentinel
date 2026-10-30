@@ -179,8 +179,20 @@ enum ModelCommands {
     },
 }
 
+/// Rust ignores SIGPIPE, so `println!` panics when stdout is a closed pipe (`sentinel model list | head`). A CLI should
+/// exit quietly like every other Unix tool.
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: resets one signal's disposition to the OS default before any threads or output exist.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(unix)]
+    restore_sigpipe();
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
@@ -331,10 +343,17 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
                 match build_any(&component, &set)? {
-                    Built::Graph(g) => show(None, &g),
+                    Built::Graph(g) => {
+                        show(None, &g);
+                        print_summary("MODEL", &g.stats());
+                    }
                     Built::Gan(v) => {
                         show(Some("generator"), &v.generator);
                         show(Some("discriminator"), &v.discriminator);
+                        print_summary("GENERATOR", &v.generator.stats());
+                        print_summary("DISCRIMINATOR", &v.discriminator.stats());
+                        let total = v.generator.stats().params + v.discriminator.stats().params;
+                        println!("\nGAN total     {} parameters ({} as float32)", count(total), size(total * 4));
                         println!("\ntraining: latent {} · {} epochs · lr_g {} · lr_d {} · {} discriminator step(s) per generator step", v.training.latent, v.training.epochs, v.training.lr_g, v.training.lr_d, v.training.d_steps);
                     }
                 }
@@ -432,19 +451,60 @@ fn build_any(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::c
     Ok(c.build(&overrides)?)
 }
 
+fn count(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
+fn human(n: f64) -> String {
+    if n >= 1e9 { format!("{:.2} G", n / 1e9) } else if n >= 1e6 { format!("{:.2} M", n / 1e6) } else if n >= 1e3 { format!("{:.1} k", n / 1e3) } else { format!("{n:.0}") }
+}
+
+fn size(bytes: u64) -> String {
+    if bytes >= 1 << 20 { format!("{:.1} MB", bytes as f64 / (1 << 20) as f64) } else { format!("{:.1} KB", bytes as f64 / 1024.0) }
+}
+
+/// One summary block: parameters, memory, compute, composition and where the weights live.
+fn print_summary(title: &str, st: &sentinel_core::graph::GraphStats) {
+    println!("\n{title}");
+    println!("  parameters   {} ({} as float32)", count(st.params), size(st.bytes_fp32));
+    match st.macs {
+        Some(m) => println!("  compute      {}MACs per sample (matrix and convolution layers)", human(m as f64)),
+        None => println!("  compute      unknown (some sizes are symbolic)"),
+    }
+    println!("  structure    {} fundamental blocks · {} compound blocks · {} level(s) of nesting", st.blocks, st.compounds, st.depth);
+    let mut by: Vec<(&String, &u64)> = st.by_block.iter().filter(|(_, v)| **v > 0).collect();
+    by.sort_by(|a, b| b.1.cmp(a.1));
+    if !by.is_empty() {
+        let parts: Vec<String> = by.iter().take(5).map(|(k, v)| format!("{k} {:.0}%", **v as f64 / st.params.max(1) as f64 * 100.0)).collect();
+        println!("  weights in   {}", parts.join(" · "));
+    }
+}
+
 /// Print a graph's nodes with shapes; compound blocks are expanded one indent level deeper.
 fn print_nodes(g: &sentinel_core::graph::ValidatedGraph, depth: usize) {
     let pad = "  ".repeat(depth);
+    let st = g.stats();
     for node in &g.order {
         let b = g.kind(node);
+        let ns = &st.by_node[node];
+        let tag = if ns.shared { "shared".to_string() } else if ns.params > 0 { count(ns.params) } else { String::new() };
         for port in b.outputs() {
             let shape = &g.shapes[&format!("{node}.{port}")];
             let ins: Vec<String> = b.inputs().iter().map(|p| g.wires[&(node.clone(), p.clone())].key()).collect();
             println!(
-                "node   {pad}{:<14} {:<22} {:<20} <- {}",
+                "node   {pad}{:<14} {:<22} {:<20} {:>11}  <- {}",
                 format!("{node}.{port}"),
                 if b.tier() == "compound" { format!("{} (compound)", b.name()) } else { b.name() },
                 sentinel_core::graph::fmt_shape(shape),
+                if port == b.outputs()[0] { tag.clone() } else { String::new() },
                 ins.join(", ")
             );
         }

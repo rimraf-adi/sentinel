@@ -347,7 +347,27 @@ async fn get_system(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn list_components(State(state): State<AppState>) -> impl IntoResponse {
-    let components: Vec<_> = state.registry().list().into_iter().cloned().collect();
+    let registry = state.registry();
+    // Each component is returned with the size of its default configuration (parameters, memory, MACs).
+    let components: Vec<serde_json::Value> = registry
+        .list()
+        .into_iter()
+        .map(|c| {
+            let mut v = serde_json::to_value(c).unwrap_or_default();
+            let stats = match c.build(&HashMap::new()) {
+                Ok(sentinel_core::components::Built::Graph(g)) => serde_json::to_value(g.stats()).ok(),
+                Ok(sentinel_core::components::Built::Gan(g)) => {
+                    let p = g.generator.stats().params + g.discriminator.stats().params;
+                    Some(json!({ "params": p, "bytes_fp32": p * 4 }))
+                }
+                Err(_) => None,
+            };
+            if let (Some(obj), Some(st)) = (v.as_object_mut(), stats) {
+                obj.insert("stats".into(), st);
+            }
+            v
+        })
+        .collect();
     Json(components)
 }
 
@@ -670,8 +690,8 @@ async fn graph_validate(State(state): State<AppState>, Json(req): Json<GraphRequ
     }
 }
 
-/// Per-node description with shapes; compound nodes carry the same description of their inner graph.
-fn describe(g: &sentinel_core::graph::ValidatedGraph) -> serde_json::Map<String, serde_json::Value> {
+/// Per-node description with shapes and sizes; compound nodes carry the same description of their inner graph.
+fn describe(g: &sentinel_core::graph::ValidatedGraph, st: &sentinel_core::graph::GraphStats) -> serde_json::Map<String, serde_json::Value> {
     use sentinel_core::graph::Dim;
     let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
     let mut nodes = serde_json::Map::new();
@@ -679,9 +699,10 @@ fn describe(g: &sentinel_core::graph::ValidatedGraph) -> serde_json::Map<String,
         let b = g.kind(n);
         let outs: serde_json::Map<String, serde_json::Value> = b.outputs().iter().map(|p| (p.clone(), json!(dims(&g.shapes[&format!("{n}.{p}")])))).collect();
         let ins: serde_json::Map<String, serde_json::Value> = b.inputs().iter().map(|p| (p.clone(), json!(g.wires[&(n.clone(), p.clone())].key()))).collect();
-        let mut node = json!({ "block": b.name(), "tier": b.tier(), "inputs": ins, "outputs": outs });
-        if let Some(inner) = g.compounds.get(n) {
-            node["inner"] = json!({ "order": inner.order, "nodes": describe(inner) });
+        let ns = &st.by_node[n];
+        let mut node = json!({ "block": b.name(), "tier": b.tier(), "inputs": ins, "outputs": outs, "params": ns.params, "macs": ns.macs, "shared": ns.shared });
+        if let (Some(inner), Some(inner_st)) = (g.compounds.get(n), ns.inner.as_ref()) {
+            node["inner"] = json!({ "order": inner.order, "nodes": describe(inner, inner_st) });
         }
         nodes.insert(n.clone(), node);
     }
@@ -696,22 +717,26 @@ fn validate_graph(state: &AppState, req: &GraphRequest) -> Result<serde_json::Va
         Built::Graph(g) => g,
         // A GAN is two graphs: describe both (the Builder edits a single graph, so it gets no `spec`).
         Built::Gan(v) => {
+            let (gs, ds) = (v.generator.stats(), v.discriminator.stats());
             return Ok(json!({
                 "ok": true, "id": id, "kind": "gan", "trainable": true,
-                "generator": { "order": v.generator.order, "nodes": describe(&v.generator) },
-                "discriminator": { "order": v.discriminator.order, "nodes": describe(&v.discriminator) },
+                "generator": { "order": v.generator.order, "nodes": describe(&v.generator, &gs), "stats": gs },
+                "discriminator": { "order": v.discriminator.order, "nodes": describe(&v.discriminator, &ds), "stats": ds },
+                "stats": { "params": gs.params + ds.params, "bytes_fp32": (gs.params + ds.params) * 4 },
                 "training": serde_json::to_value(&v.training).unwrap_or_default(),
             }));
         }
     };
     let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
-    let nodes = describe(&g);
+    let stats = g.stats();
+    let nodes = describe(&g, &stats);
     let inputs: serde_json::Map<String, serde_json::Value> =
         g.spec.inputs.iter().map(|(k, v)| (k.clone(), json!(dims(v)))).collect();
     let outputs: serde_json::Map<String, serde_json::Value> =
         g.outputs.iter().map(|(k, v)| (k.clone(), json!(v.key()))).collect();
     Ok(json!({
         "ok": true, "id": id, "order": g.order, "inputs": inputs, "nodes": nodes, "outputs": outputs,
+        "stats": stats,
         "trainable": g.spec.training.is_some(),
         "spec": serde_json::to_value(&g.spec).unwrap_or(serde_json::Value::Null),
         "params": serde_json::to_value(&g.params).unwrap_or(serde_json::Value::Null),

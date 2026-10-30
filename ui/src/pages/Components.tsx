@@ -3,7 +3,7 @@ import { api, type Component } from '../api';
 import { usePoll } from '../hooks';
 import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
 import { Icon } from '../icons';
-import { EmptyState, Field, Modal, Skeleton, useToast } from '../ui';
+import { EmptyState, Field, Modal, Skeleton, fmtBytes, fmtCount, useToast } from '../ui';
 
 function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => void; refresh: () => void; go: (t: string) => void }) {
   const toast = useToast();
@@ -103,7 +103,7 @@ export function Components({ refresh, go, openInBuilder }: { refresh: () => void
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.component_id}</div>
             <p style={{ color: 'var(--text-secondary)', margin: '8px 0 14px', flex: 1 }}>{c.description}</p>
             <div className="row sp">
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{Object.keys(c.parameters).length} hyperparameters</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{Object.keys(c.parameters).length} hyperparameters{c.stats ? ` · ${fmtCount(c.stats.params)} params (${fmtBytes(c.stats.bytes_fp32)})` : ''}</span>
               <div className="row">
                 {c.graph ? <button className="btn sm" onClick={() => openInBuilder(c.component_id)}>Open in Builder</button> : null}
                 <button className="btn sm primary" onClick={() => setSel(c)}>Configure</button>

@@ -284,9 +284,12 @@ model = Model(){class_check}
 loss_fn = {loss_ctor}
 optimizer = torch.optim.{opt}(model.parameters(), lr={lr})
 
+N_PARAMS = sum(p.numel() for p in model.parameters())
+print(f"model: {{N_PARAMS:,}} parameters ({{N_PARAMS * 4 / 1048576:.2f}} MB as float32)", flush=True)
+
 try:
     import sentinel
-    sentinel.init(run_name={graph_id:?}, config=json.loads({cfg:?}))
+    sentinel.init(run_name={graph_id:?}, config={{**json.loads({cfg:?}), "n_params": N_PARAMS}})
 except Exception:
     sentinel = None
 
@@ -340,7 +343,7 @@ except Exception as _e:
 with open(_art / "meta.json", "w") as _f:
     json.dump({{
         "graph": {graph_id:?}, "task": "{task}", "features": [{feats}], "target": {target_json},
-        "classes": {classes_expr}, "input_shape": list(_example.shape[1:]), "loss": "{loss_name}",
+        "classes": {classes_expr}, "input_shape": list(_example.shape[1:]), "loss": "{loss_name}", "n_params": N_PARAMS,
         "test_{metric_name_plain}": metric, "torch": torch.__version__, "files": _files,
     }}, _f, indent=2)
 shutil.copyfile(__file__, _art / "train.py")

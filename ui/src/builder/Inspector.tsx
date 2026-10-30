@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { BlockInfo, NodeDesc, Training, ValidateOk } from '../api';
 import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
-import { Field } from '../ui';
+import { Field, fmtBytes, fmtCount } from '../ui';
 import { IDENT } from './convert';
 import type { BNode } from './types';
 
@@ -26,6 +26,7 @@ function Inner({ nodes, order, depth }: { nodes: Record<string, NodeDesc>; order
             <div className="inner-row" style={{ paddingLeft: depth * 14 }}>
               <span className={'tier-dot ' + n.tier} title={n.tier} />
               <span>{id}</span><span className="muted">{n.block}</span>
+              {n.params > 0 && <span className="mono pc">{fmtCount(n.params)}</span>}
               {shape && <span className="mono shape">[{shape.join(', ')}]</span>}
             </div>
             {n.inner && <Inner nodes={n.inner.nodes} order={n.inner.order} depth={depth + 1} />}
@@ -90,6 +91,12 @@ export function Inspector(p: InspectorProps) {
       <>
         <h4>{node.data.block} <span className={'tier-tag ' + (b?.tier ?? '')}>{b?.tier}</span></h4>
         <p className="hint">{b?.description}</p>
+        {p.result?.nodes[node.id] && (
+          <div className="kv" style={{ marginBottom: 10 }}>
+            <span>Parameters</span><b>{p.result.nodes[node.id].shared ? 'shared (counted once)' : `${p.result.nodes[node.id].params.toLocaleString()} · ${fmtBytes(p.result.nodes[node.id].params * 4)}`}</b>
+            <span>MACs / sample</span><b>{p.result.nodes[node.id].macs === null ? 'n/a' : fmtCount(p.result.nodes[node.id].macs!)}</b>
+          </div>
+        )}
         {b?.tier === 'compound' && (
           <div className="inner">
             <div className="stat-title">Built from</div>
