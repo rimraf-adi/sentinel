@@ -1,0 +1,48 @@
+schema_version: "1.0"
+template_id: "llm/lora-finetune@v1"
+name: "LLM LoRA Fine-Tuning"
+description: "Parameter-efficient fine-tuning with PEFT LoRA and bfloat16"
+domain: "llm"
+defaults:
+  - model: smollm-135m
+  - dataset: alpaca-jsonl
+  - _self_
+parameters:
+  model.name_or_path:
+    type: string
+    default: "HuggingFaceTB/SmolLM-135M"
+    help: "Base model identifier from Hugging Face Hub"
+  lora.r:
+    type: int
+    default: 16
+    range: [4, 128]
+    help: "LoRA rank"
+  lora.alpha:
+    type: int
+    default: 32
+    range: [8, 256]
+    help: "LoRA scaling alpha"
+  training.lr:
+    type: float
+    default: 0.0002
+    range: [0.00001, 0.01]
+    help: "Learning rate"
+  training.epochs:
+    type: int
+    default: 3
+    range: [1, 20]
+locked:
+  training.precision: "bf16-mixed"
+  tracking.backend: "mlflow"
+sweep:
+  optimizer: "optuna"
+  pruner: "asha"
+  max_trials: 15
+  params:
+    training.lr:
+      type: "float_log"
+      min: 0.00005
+      max: 0.001
+smoke_test:
+  training.epochs: 1
+  device: "cpu"

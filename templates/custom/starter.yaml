@@ -1,0 +1,27 @@
+schema_version: "1.0"
+template_id: "custom/starter@v1"
+name: "Custom Template Starter"
+description: "Starter template for user-defined training recipes"
+domain: "custom"
+defaults:
+  - _self_
+parameters:
+  training.lr:
+    type: float
+    default: 0.0001
+    range: [0.000001, 1.0]
+    help: "Learning rate"
+  training.batch_size:
+    type: int
+    default: 32
+    range: [1, 1024]
+    help: "Batch size"
+locked:
+  tracking.backend: "mlflow"
+sweep:
+  optimizer: "optuna"
+  pruner: "asha"
+  max_trials: 10
+smoke_test:
+  training.epochs: 1
+  device: "cpu"

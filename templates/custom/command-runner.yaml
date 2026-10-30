@@ -1,0 +1,19 @@
+schema_version: "1.0"
+template_id: "custom/command-runner@v1"
+name: "Custom Command Runner"
+description: "Zero-touch adapter wrapping existing python training commands"
+domain: "custom"
+defaults: []
+parameters:
+  command:
+    type: string
+    default: "python train.py"
+    help: "Shell command to run"
+locked:
+  tracking.backend: "mlflow"
+sweep:
+  optimizer: "optuna"
+  pruner: "asha"
+  max_trials: 10
+smoke_test:
+  command: "python -c 'print(\"smoke test passed\")'"

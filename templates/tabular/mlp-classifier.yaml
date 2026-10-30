@@ -1,0 +1,39 @@
+schema_version: "1.0"
+template_id: "tabular/mlp-classifier@v1"
+name: "Tabular MLP Classifier"
+description: "Structured data classification with multi-layer perceptron"
+domain: "tabular"
+defaults:
+  - model: tabular-mlp
+  - dataset: custom-csv
+  - _self_
+parameters:
+  model.hidden_dim:
+    type: int
+    default: 128
+    range: [32, 1024]
+    help: "Hidden layer dimension"
+  model.num_layers:
+    type: int
+    default: 3
+    range: [1, 10]
+    help: "Number of MLP layers"
+  training.lr:
+    type: float
+    default: 0.001
+    range: [0.00001, 0.1]
+    help: "Learning rate"
+  training.batch_size:
+    type: int
+    default: 128
+    range: [16, 2048]
+    help: "Batch size"
+locked:
+  tracking.backend: "mlflow"
+sweep:
+  optimizer: "optuna"
+  pruner: "asha"
+  max_trials: 20
+smoke_test:
+  training.epochs: 1
+  device: "cpu"
