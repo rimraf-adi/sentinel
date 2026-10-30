@@ -1,179 +1,309 @@
-# Sentinel 🛡️
+# Sentinel
 
-> **The watchful guardian for your training runs.**  
-> *"Rust is boss. Python is worker."*
+**Enterprise-Grade Machine Learning Training Supervisor, Dynamic Scheduler, and Operations Plane**
 
-[![Rust](https://img.shields.io/badge/Rust-2021_Edition-orange?logo=rust)](https://www.rust-lang.org)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org)
-[![Package Manager](https://img.shields.io/badge/uv-strictly_enforced-purple?logo=astral)](https://github.com/astral-sh/uv)
-[![Storage](https://img.shields.io/badge/MLflow-3.x_Native-0194E2?logo=mlflow)](https://mlflow.org)
-[![Tests](https://img.shields.io/badge/Tests-31%20Passed-brightgreen)](https://github.com/rimraf-adi/sentinel)
+[![Rust Version](https://img.shields.io/badge/Rust-2021_Edition-orange?logo=rust)](https://www.rust-lang.org)
+[![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org)
+[![Package Manager](https://img.shields.io/badge/Environment-uv-purple?logo=astral)](https://github.com/astral-sh/uv)
+[![Storage Standard](https://img.shields.io/badge/Storage-MLflow_3.x_Compliant-0194E2?logo=mlflow)](https://mlflow.org)
+[![Build Status](https://img.shields.io/badge/Tests-31%20Passed-brightgreen)](https://github.com/rimraf-adi/sentinel)
+[![Default Port](https://img.shields.io/badge/Port-2512-gray)](http://localhost:2512)
 [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](LICENSE)
 
-Sentinel is a high-performance machine learning supervisor, job scheduler, and experiment control plane built with a dual-engine architecture:
+---
 
-* **Rust is Boss:** A single, lightweight Rust binary manages process supervision, dynamic GPU worker pool allocation, NVML telemetry, WebSocket streaming, and a zero-overhead Vercel-style web interface.
-* **Python is Worker:** Pure Python processes execute deep learning models with PyTorch, torchvision, HuggingFace, and Optuna without proprietary training wrappers or framework lock-in.
+## 1. System Overview
+
+Sentinel is a high-performance, dual-engine machine learning infrastructure platform engineered to decouple experiment orchestration from deep learning execution. Traditional machine learning workflows often suffer from boilerplate proliferation, fragile Python-level process supervision, unvalidated configuration drift, and restrictive framework lock-in.
+
+Sentinel addresses these structural bottlenecks through an asynchronous, bifurcated control topology:
+
+* **Control & Supervision Plane (Rust):** A standalone, statically compiled native binary responsible for asynchronous process supervision, non-colliding dynamic GPU allocation, hardware telemetry ingestion (NVML), WebSocket event streaming, declarative template resolution, and an ultra-low-overhead web management console.
+* **Execution & Compute Plane (Python):** Pure, unencumbered Python runtimes executing standard frameworks (PyTorch, torchvision, Hugging Face, Optuna). Workloads execute without proprietary base classes, non-standard runtime wrappers, or foreign abstraction layers.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        SENTINEL CONTROL PLANE                          │
+│                      (High-Performance Native Rust)                    │
+│                                                                        │
+│  ┌──────────────────┐  ┌─────────────────────┐  ┌───────────────────┐  │
+│  │ Web UI Console   │  │ Process Supervisor  │  │ Dynamic GPU Pool  │  │
+│  │ (Port 2512)      │  │ (SIGTERM / Draining)│  │ (NVML Allocation) │  │
+│  └─────────┬────────┘  └──────────┬──────────┘  └─────────┬─────────┘  │
+│            │                      │                       │            │
+│            ▼                      ▼                       ▼            │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │             Axum REST API & WebSocket Telemetry Hub              │  │
+│  └────────────────────────────────┬─────────────────────────────────┘  │
+└───────────────────────────────────┼────────────────────────────────────┘
+                                    │ (CUDA_VISIBLE_DEVICES, Pipes, IPC)
+┌───────────────────────────────────┼────────────────────────────────────┐
+│                                   ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                `uv run` Managed Python Subprocesses              │  │
+│  │                                                                  │  │
+│  │   ┌─────────────────────┐              ┌──────────────────────┐  │  │
+│  │   │ PyTorch Model Loop  │              │ Optuna ASHA Sweeps   │  │  │
+│  │   └──────────┬──────────┘              └──────────┬───────────┘  │  │
+│  │              │                                    │              │  │
+│  │              ▼                                    ▼              │  │
+│  │   ┌───────────────────────────────────────────────────────────┐  │  │
+│  │   │            `sentinel-sdk` (Crash-Immune Client)           │  │  │
+│  │   └─────────────────────────────┬─────────────────────────────┘  │  │
+│  └─────────────────────────────────┼────────────────────────────────┘  │
+│                                    ▼                                   │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │              Strict MLflow-Compliant Store (`mlruns/`)           │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+│                         EXECUTION & DATA PLANE                         │
+└────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Key Pillars & Features
+## 2. Core Capabilities
 
-### 1. Minimalist Monochrome Dashboard (Vercel Style)
-* **Geist-Inspired Design:** Clean, high-contrast pitch-black (`#000000`) and pure white (`#ffffff`) aesthetic with thin crisp borders (`#222222`).
-* **Sidebar Navigation:** Workspace overview, live runs, hyperparameter sweeps, template catalog, dataset mounts, machine telemetry, and in-browser code viewer.
-* **Clean Empty States:** Unobtrusive, minimal fallback states when no training runs or external projects are registered.
+### 2.1 Asynchronous Process Supervision & GPU Allocation
+* **Deterministic Process Lifecycle:** Subprocess execution is managed asynchronously via `tokio::process`. Processes receive POSIX `SIGTERM` signals for graceful termination, followed by automated stdout/stderr buffer drainage and exit code capture.
+* **Dynamic GPU Worker Pool:** The platform queries NVML to monitor physical GPU utilization, compute load, temperature, and VRAM occupancy. Device slots are dynamically assigned to jobs via `CUDA_VISIBLE_DEVICES` injection to prevent memory contention. Transparent CPU fallback is provided when compute devices are unavailable.
 
-### 2. Strict Read-Only Code View (Zero RAM Bloat)
-* **Code / IDE View is Strictly Read-Only:** Inspect recipes, configs, and project source files in the browser with ultra-low latency and zero memory overhead. Code cannot be accidentally mutated in the browser.
-* **Editable Dashboards & Controls:** All other components—recipe parameter forms, custom command execution, sweep budgets, and job lifecycle controls—remain 100% interactive and editable.
+### 2.2 Declarative Recipe Templates with Inheritance
+* **Strict Parameter Typing & Bounds:** Experiment configurations are defined through typed YAML schemas (`int`, `float`, `string`, `choice`) with strict numeric bounds (`[min, max]`) and choice enumerations.
+* **Hierarchical Inheritance:** Templates compose hierarchically via `extends:` directives, allowing base configurations to be safely specialized across tasks and architectures.
+* **Framework Invariant Protection:** Critical production configurations (e.g., `tracking.backend: mlflow`, `precision: bf16-mixed`) can be marked as `locked`, preventing unintended override during runtime execution.
 
-### 3. Declarative Template Engine & Inheritance
-* **Structured Schemas:** Hierarchical configuration with typed parameters (`int`, `float`, `string`, `choice`), range bounds (`[min, max]`), and default values.
-* **Locked Framework Safeguards:** Protect production parameters (e.g. `tracking.backend: mlflow`, `precision: bf16-mixed`) from accidental runtime overrides.
-* **Zero Lock-In Exporter (`sentinel export script`):** Translates declarative template configurations into standalone, pure bare PyTorch code stripping both Sentinel and Lightning.
+### 2.3 Zero-Lock-In Standalone Script Compilation
+* **Unencumbered Code Generation:** The compilation command (`sentinel export script`) resolves template hierarchies and parameter dictionaries into standalone, production-grade PyTorch scripts (`train.py`).
+* **Complete Framework Decoupling:** Generated scripts have zero dependencies on Sentinel, Lightning, or proprietary runtime packages, ensuring workloads can execute directly in arbitrary environments.
 
-### 4. Dynamic GPU Pool & Process Supervisor
-* **Zero-Collision GPU Packing:** `DynamicGpuPool` tracks physical GPU slots, automatically packs jobs onto available devices via `CUDA_VISIBLE_DEVICES`, and falls back to CPU when needed.
-* **Process Lifecycle:** Asynchronous subprocess management with SIGTERM termination, log streaming, exit code capture, and post-exit pipe draining.
-* **Live Telemetry:** Real-time host CPU, host RAM, GPU utilization, temperature, and VRAM monitoring via NVML.
+### 2.4 Distributed Hyperparameter Optimization (Optuna ASHA)
+* **Automated Trial Scheduling:** Integrated with Optuna's Asynchronous Successive Halving Algorithm (`SuccessiveHalvingPruner`).
+* **VRAM Recovery through Early Pruning:** Diverging or underperforming candidate models are terminated early, releasing GPU memory slots back into the dynamic pool for concurrent trials.
 
-### 5. Optuna ASHA Sweeps Orchestrator
-* Automated hyperparameter optimization powered by Optuna with `SuccessiveHalvingPruner` (ASHA).
-* Concurrently evaluates trials and terminates diverging candidates early to free VRAM for promising runs.
+### 2.5 Resilient, Crash-Immune Telemetry SDK
+* **Zero Overhead Isolation:** The `sentinel-sdk` Python client writes metrics and parameters directly to the filesystem following strict MLflow 2.x and 3.x specifications (`mlruns/`).
+* **Non-Blocking Telemetry Ingestion:** All SDK calls are wrapped in non-panicking failsafe mechanisms. Disk write anomalies, network drops, or supervisor outages **never disrupt active training loops**.
 
-### 6. Crash-Immune Python SDK (`sentinel-sdk`)
-* Standard MLflow-native file logging (`mlruns/`) with zero dependency on an active daemon.
-* Failsafe decorators guarantee that telemetry or disk errors **never halt or crash model training**.
+### 2.6 Outbound Edge Agent for Remote Nodes
+* **Firewall and NAT Traversing:** The `sentinel-agent` service establishes outbound-only WebSocket links to the primary supervisor daemon, eliminating the requirement for exposed inbound ports.
+* **Durable Disk Buffering:** In the event of network disruption, telemetry events are serialized to an append-only on-disk ledger (`.sentinel/agent_buffer.jsonl`) and replayed deterministically upon reconnection.
 
-### 7. Outbound Remote Node Agent (`sentinel-agent`)
-* Lightweight remote agent connecting outbound via WebSocket to the central supervisor (firewall and NAT friendly).
-* Persistent on-disk queue (`.sentinel/agent_buffer.jsonl`) buffers events during network outages and replays them upon reconnection.
+### 2.7 Operations Management Console (Default Port 2512)
+* **Geist-Inspired Monochrome Interface:** High-contrast pitch-black (`#000000`) and pure white (`#ffffff`) operational dashboard engineered for continuous operations monitoring.
+* **Strict Read-Only Code Isolation:** Project source code and training recipes are displayed in a read-only browser to eliminate accidental client-side mutation while keeping memory overhead negligible.
+* **Interactive Control Planes:** Recipe parameters, sweep boundaries, and process supervision controls remain fully interactive and editable.
+* **Graceful Empty-State Fallbacks:** System cards gracefully display operational standby states when experiments or external repositories are uninitialized.
 
 ---
 
-## Repository Architecture
+## 3. Workspace Architecture
+
+The platform is structured as a Cargo multi-crate workspace accompanied by a root Python workspace managed via `uv`:
 
 ```
 uxML/
-├── Cargo.toml                       # Rust workspace configuration (5 crates)
-├── pyproject.toml                   # uv workspace & maturin wheel config
-├── uv.lock                          # Pinned Python dependencies
-├── sentinel.md                      # Master architecture specification
-├── FILES.md                         # Detailed codebase inventory for agent handoffs
+├── Cargo.toml                       # Workspace manifest defining Rust members and dependencies
+├── pyproject.toml                   # Root Python project specification (uv workspace mode)
+├── uv.lock                          # Cryptographically pinned Python dependencies
+├── sentinel.md                      # Technical specifications and architectural design document
+├── README.md                        # Master platform documentation
+├── guide.md                         # Operational guide for autonomous agents
+├── FILES.md                         # Complete codebase inventory and handoff documentation
+├── .agents/
+│   └── skills/
+│       └── sentinel-integration/    # Antigravity operational skill specification
 ├── crates/
-│   ├── sentinel-core/               # Domain models, Hydra config, template engine, script exporter
-│   ├── sentinel-daemon/             # Process supervisor, dynamic GPU pool, NVML monitor, Axum server
-│   ├── sentinel-agent/              # Outbound agent with offline persistent disk buffer
-│   ├── sentinel-cli/                # Unified binary CLI (`sentinel dev`, `template`, `export`, `sweep`)
-│   └── sentinel-ui/                 # Standalone Vercel-style HTML/WASM dashboard & state engine
+│   ├── sentinel-core/               # Domain primitives, Hydra configuration, template engine
+│   ├── sentinel-daemon/             # Process supervisor, dynamic GPU pool, Axum REST/WebSocket
+│   ├── sentinel-agent/              # Remote node agent with offline disk-buffer replay
+│   ├── sentinel-cli/                # Unified binary CLI (`sentinel dev`, `template`, `export`)
+│   └── sentinel-ui/                 # Standalone web dashboard and operational state engine
 ├── packages/
-│   └── sentinel-sdk/                # Python client SDK with crash-immune MLflow 3.x tracking
+│   └── sentinel-sdk/                # Python client SDK with crash-immune MLflow tracking
 ├── recipes/
-│   ├── vision_train.py              # Reference synthetic PyTorch image classification loop
-│   └── sweep_orchestrator.py        # Optuna ASHA multi-trial hyperparameter sweep engine
+│   ├── vision_train.py              # Synthetic PyTorch vision classification loop
+│   └── sweep_orchestrator.py        # Distributed Optuna ASHA hyperparameter sweep engine
 ├── templates/
 │   ├── vision/                      # Computer vision image classification template
-│   ├── llm/                         # LLM PEFT/LoRA fine-tuning template
+│   ├── llm/                         # Large Language Model PEFT/LoRA fine-tuning template
 │   ├── tabular/                     # Multi-layer perceptron tabular classification template
-│   └── custom/                      # Starter and custom command runner templates
+│   └── custom/                      # Starter custom recipes and arbitrary command adapters
 └── tests/
-    └── e2e_lifecycle.sh             # End-to-end integration test script
+    └── e2e_lifecycle.sh             # Automated end-to-end user lifecycle integration test
 ```
 
 ---
 
-## Quickstart
+## 4. Installation & Deployment
 
-### Prerequisites
+### 4.1 System Prerequisites
 
-* **Rust:** 1.75+ (`cargo`, `rustc`)
-* **Python:** 3.10+ managed strictly via **`uv`**
+* **Rust Toolchain:** Version 1.75 or higher (`cargo`, `rustc`)
+* **Python Runtime:** Version 3.10 or higher
+* **Package Management:** Strictly managed via **`uv`**
+
+### 4.2 Building from Source
 
 ```bash
 # Clone the repository
 git clone https://github.com/rimraf-adi/sentinel.git
 cd sentinel
 
-# Install Python dependencies using uv
+# Synchronize the locked Python environment
 uv sync
+
+# Compile the unified release binary
+cargo build --release -p sentinel-cli
 ```
 
-### Build & Run the Dashboard
+The compiled binary will be located at `target/release/sentinel`.
+
+### 4.3 Starting the Control Daemon
+
+By default, the platform initializes the server on port **`2512`**:
 
 ```bash
-# Compile the Sentinel CLI
-cargo build -p sentinel-cli
-
-# Start the local daemon and web interface (defaults to port 2512)
-target/debug/sentinel dev
+# Start daemon and launch the operations console
+./target/release/sentinel dev
 ```
 
-Open your browser at **`http://localhost:2512`** to view the Vercel-style training control dashboard.
+Output:
+```text
+🚀 Sentinel Daemon active at http://localhost:2512
+   API health: http://localhost:2512/api/health
+   WebSocket telemetry: ws://localhost:2512/ws/live
+```
+
+To configure a custom port:
+```bash
+./target/release/sentinel dev --port 3000
+```
 
 ---
 
-## CLI Reference
+## 5. Command-Line Interface (CLI) Specification
 
-| Command | Description |
-| :--- | :--- |
-| `sentinel dev [--port 2512]` | Starts the Axum daemon REST/WebSocket server and serves the web UI (default: 2512) |
-| `sentinel new <project-name>` | Scaffolds a new project repository with conventions and configs |
-| `sentinel template list` | Lists all built-in and custom templates in the registry |
-| `sentinel template new <name> [--extends <parent>]` | Generates a custom template starter YAML |
-| `sentinel template check <path>` | Validates YAML syntax, parameter types, ranges, and locked fields |
-| `sentinel template save-run <run-id>` | Freezes an experiment run's parameters into a reusable template |
-| `sentinel export script [--template <id>]` | Generates a pure bare PyTorch standalone script |
-| `sentinel sweep <config>` | Runs an automated Optuna ASHA hyperparameter sweep |
+```text
+Usage: sentinel <COMMAND>
+
+Commands:
+  dev       Start daemon and launch the low-overhead Web UI [default port: 2512]
+  new       Scaffold a new project repository with conventions and configs
+  run       Run a training job from a template or config
+  sweep     Launch Optuna ASHA hyperparameter sweep
+  template  Template management subcommands (list, new, check, save-run)
+  export    Export run as standalone pure bare PyTorch script
+  help      Print this message or the help of the given subcommand(s)
+```
+
+### Detailed Command Index
+
+| Command | Arguments / Flags | Description |
+| :--- | :--- | :--- |
+| `sentinel dev` | `[--port <PORT>]` (default: `2512`) | Starts the Axum HTTP REST and WebSocket telemetry daemon. |
+| `sentinel new <NAME>` | `<NAME>` | Scaffolds a new ML project structure with default templates and configs. |
+| `sentinel template list` | None | Discovers and displays built-in and custom templates. |
+| `sentinel template new <NAME>` | `[--domain <DOMAIN>]` `[--extends <PARENT>]` | Scaffolds a valid custom template configuration. |
+| `sentinel template check <PATH>` | `<PATH>` | Validates syntax, parameter ranges, choices, and locked attributes. |
+| `sentinel template save-run <ID>` | `<ID>` `--name <NAME>` | Freezes parameters from an executed experiment into a reusable template. |
+| `sentinel export script` | `[--template <ID>]` `[--output <PATH>]` | Transpiles a template configuration into pure PyTorch code. |
+| `sentinel sweep <CONFIG>` | `<CONFIG>` | Executes parallel hyperparameter sweeps with automated early stopping. |
 
 ---
 
-## Python SDK Example
+## 6. Python Telemetry SDK Reference
+
+The `sentinel-sdk` provides an idiomatic, non-blocking telemetry interface:
 
 ```python
 import time
 import sentinel
 
-# Initialize experiment (creates MLflow 3.x structure in mlruns/)
-run = sentinel.init(experiment_name="mnist-classifier", run_name="baseline-run")
-run.log_params({"lr": 0.001, "batch_size": 64, "optimizer": "AdamW"})
+# Initialize experiment context (creates MLflow-compliant layout in mlruns/)
+run = sentinel.init(
+    experiment_name="cifar10-benchmark",
+    run_name="resnet18-baseline"
+)
 
-for epoch in range(1, 10):
-    loss = 1.0 / epoch
-    acc = 0.8 + (0.02 * epoch)
-    
-    # Safe logging: disk or daemon errors will NEVER crash training
-    run.log({"train_loss": loss, "val_acc": acc}, step=epoch)
-    time.sleep(0.1)
+# Record immutable hyperparameters
+run.log_params({
+    "model": "resnet18",
+    "learning_rate": 0.0003,
+    "batch_size": 64,
+    "optimizer": "AdamW"
+})
 
+# Training Loop
+for epoch in range(1, 11):
+    train_loss = 2.5 / epoch
+    val_accuracy = 0.70 + (0.02 * epoch)
+
+    # Log step-indexed metric telemetry
+    # Safe Execution Guarantee: Failures in logging never disrupt training.
+    run.log({
+        "train/loss": train_loss,
+        "val/accuracy": val_accuracy
+    }, step=epoch)
+
+    time.sleep(0.05)
+
+# Finalize run metadata and status
 run.finish()
 ```
 
 ---
 
-## Running Verification Tests
+## 7. Verification, Quality Assurance & Testing
 
-Sentinel includes a rigorous testing suite covering edge cases, process failures, concurrency, and MLflow parity:
+The platform enforces strict automated quality gates across systems programming and machine learning disciplines:
 
 ```bash
-# Run all 31 Rust unit & integration tests
+# 1. Execute complete Rust workspace test suite (31 tests)
 cargo test --workspace
 
-# Run Python SDK tests with uv
+# 2. Execute Python SDK compliance & crash-immunity tests
 uv run pytest packages/sentinel-sdk/tests/test_sdk.py
 uv run python packages/sentinel-sdk/tests/test_rigorous.py
 
-# Run full end-to-end user lifecycle test
+# 3. Execute End-to-End User Lifecycle Integration Test
 bash tests/e2e_lifecycle.sh
 ```
 
+### Automated Test Coverage Summary
+
+* **`sentinel-core` (15 tests):** Multi-level template inheritance resolution (`extends:`), numerical parameter boundary enforcement, categorical choice validation, locked-parameter invariance, and bare script compilation.
+* **`sentinel-daemon` (9 tests):** Subprocess signal termination (`SIGTERM`), pipe drain integrity, dynamic GPU allocation and contention handling, high-throughput log streaming (10,000+ lines), and one-million-point server-side time-series downsampling (<15ms).
+* **`sentinel-agent` (4 tests):** Offline telemetry buffering, disk queue replay upon reconnection, and corrupted record skipping.
+* **`sentinel-ui` (3 tests):** State machine transitions (`ReadOnly` $\to$ `Editing` $\to$ `Idle`) and critical DOM element validation.
+* **`sentinel-sdk`:** Strict bit-for-bit parity with official `mlflow.MlflowClient` and multithreaded logging safety.
+
 ---
 
-## License
+## 8. REST & WebSocket API Specification
 
-Licensed under either of:
+When running on default port **`2512`**, Sentinel exposes the following HTTP and WebSocket interfaces:
 
-* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+| Endpoint | Method | Payload / Response | Description |
+| :--- | :--- | :--- | :--- |
+| `/` | `GET` | HTML (`text/html`) | Minimalist monochrome operations console. |
+| `/api/health` | `GET` | `{"status": "ok", "service": "sentinel-daemon"}` | Service health verification. |
+| `/api/jobs` | `GET` | `JobRecord[]` | Lists active and historical job records. |
+| `/api/jobs` | `POST` | `{"name": "...", "command": "..."}` | Submits arbitrary command for execution. |
+| `/api/jobs/run-template`| `POST` | `{"template_id": "...", "overrides": {...}}` | Launches a job from a resolved template. |
+| `/api/jobs/:id/logs` | `GET` | `{"job_id": "...", "logs": [...]}` | Retrieves captured stdout/stderr lines. |
+| `/api/jobs/:id/stop` | `POST` | `{"status": "stopped"}` | Dispatches `SIGTERM` to active job process. |
+| `/api/hardware` | `GET` | `HardwareStats` | Real-time CPU, RAM, and NVML telemetry snapshot. |
+| `/api/templates` | `GET` | `Template[]` | Catalog of loaded declarative recipes. |
+| `/api/files/content` | `GET` | `{"content": "..."}` | Serves read-only source code for UI viewer. |
+| `/ws/live` | `WebSocket` | Live Telemetry Stream | Real-time bidirectional WebSocket metric push. |
 
-at your option.
+---
+
+## 9. License
+
+Sentinel is distributed under the dual licensing model standard in the Rust ecosystem:
+
+* **Apache License, Version 2.0** ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+* **MIT License** ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
+
+Contributions submitted for inclusion in the platform are dual-licensed under these terms.
