@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use sentinel_core::export::ScriptExporter;
 use sentinel_core::scaffold::ProjectScaffolder;
-use sentinel_core::templates::{Template, TemplateRegistry};
+use sentinel_core::components::{Component, ComponentRegistry};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -25,9 +25,9 @@ enum Commands {
         #[arg(short, long, default_value = "2512")]
         port: u16,
     },
-    /// Run a training job from a template or config
+    /// Run a training job from a component or config
     Run {
-        /// Path to config or template
+        /// Path to config or component
         config: String,
     },
     /// Launch hyperparameter sweep
@@ -35,17 +35,17 @@ enum Commands {
         /// Path to sweep config
         config: String,
     },
-    /// Template commands (list, new, check, save-run)
-    Template {
+    /// Component commands (list, new, check, save-run)
+    Component {
         #[command(subcommand)]
-        command: TemplateCommands,
+        command: ComponentCommands,
     },
     /// Export run as standalone pure bare PyTorch script
     Export {
         #[arg(default_value = "script")]
         format: String,
         #[arg(short, long, default_value = "vision/image-classification@v1")]
-        template: String,
+        component: String,
         #[arg(short, long, default_value = "train_standalone.py")]
         output: String,
     },
@@ -63,10 +63,10 @@ enum Commands {
 }
 
 #[derive(Subcommand, Debug)]
-enum TemplateCommands {
-    /// List all built-in and custom templates
+enum ComponentCommands {
+    /// List all built-in and custom components
     List,
-    /// Create a new custom template starter
+    /// Create a new custom component starter
     New {
         name: String,
         #[arg(short, long, default_value = "custom")]
@@ -74,10 +74,31 @@ enum TemplateCommands {
         #[arg(short, long)]
         extends: Option<String>,
     },
-    /// Validate a template YAML
+    /// Validate a component YAML
     Check { path: String },
-    /// Save an existing run as a reusable template
+    /// Save an existing run as a reusable component
     SaveRun { run_id: String, name: String },
+    /// List the neural-network building blocks available to component graphs
+    Blocks,
+    /// Show a graph component: execution order and the tensor shape on every port
+    Show {
+        component: String,
+        /// Parameter override, repeatable: --set hidden=64
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+    },
+    /// Compile a graph component into a standalone PyTorch script
+    Compose {
+        component: String,
+        #[arg(short, long, default_value = "train.py")]
+        output: String,
+        /// Parameter override, repeatable: --set hidden=64
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// Emit only the `Model` class (no data loading or training loop)
+        #[arg(long)]
+        model_only: bool,
+    },
 }
 
 #[tokio::main]
@@ -109,14 +130,14 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Template { command }) => match command {
-            TemplateCommands::List => {
-                let mut registry = TemplateRegistry::new();
-                let templates_dir = Path::new("templates");
-                let custom_loaded = registry.load_from_dir(templates_dir).unwrap_or(0);
+        Some(Commands::Component { command }) => match command {
+            ComponentCommands::List => {
+                let mut registry = ComponentRegistry::new();
+                let components_dir = Path::new("components");
+                let custom_loaded = registry.load_from_dir(components_dir).unwrap_or(0);
 
                 println!(
-                    "Found {} templates ({} custom loaded):",
+                    "Found {} components ({} custom loaded):",
                     registry.list().len(),
                     custom_loaded
                 );
@@ -128,57 +149,119 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap_or_default();
                     println!(
                         "  - {:<32} [{}] {}{}",
-                        t.template_id, t.domain, t.name, parent
+                        t.component_id, t.domain, t.name, parent
                     );
                 }
             }
-            TemplateCommands::New {
+            ComponentCommands::New {
                 name,
                 domain,
                 extends,
             } => {
-                let yaml = TemplateRegistry::create_custom_starter(
+                let yaml = ComponentRegistry::create_custom_starter(
                     &name,
                     &domain,
                     extends.as_deref(),
                 )?;
                 let file_name = format!("{}.yaml", name.to_lowercase().replace(' ', "-"));
-                let out_dir = Path::new("templates");
+                let out_dir = Path::new("components");
                 std::fs::create_dir_all(out_dir)?;
                 let out_path = out_dir.join(&file_name);
                 std::fs::write(&out_path, &yaml)?;
                 println!(
-                    "Created custom template starter at: {}",
+                    "Created custom component starter at: {}",
                     out_path.display()
                 );
             }
-            TemplateCommands::Check { path } => {
+            ComponentCommands::Check { path } => {
                 let content = std::fs::read_to_string(&path)?;
-                match Template::from_yaml(&content) {
-                    Ok(template) => {
-                        println!("Template '{}' is VALID:", template.template_id);
-                        println!("  Name: {}", template.name);
-                        println!("  Domain: {}", template.domain);
-                        println!("  Parameters defined: {}", template.parameters.len());
-                        println!("  Locked fields: {}", template.locked.len());
+                match Component::from_yaml(&content) {
+                    Ok(component) => {
+                        println!("Component '{}' is VALID:", component.component_id);
+                        println!("  Name: {}", component.name);
+                        println!("  Domain: {}", component.domain);
+                        println!("  Parameters defined: {}", component.parameters.len());
+                        println!("  Locked fields: {}", component.locked.len());
                     }
                     Err(e) => {
-                        eprintln!("Template validation FAILED: {e}");
+                        eprintln!("Component validation FAILED: {e}");
                         std::process::exit(1);
                     }
                 }
             }
-            TemplateCommands::SaveRun { run_id, name } => {
-                println!("Saving run {run_id} as template '{name}'...");
+            ComponentCommands::SaveRun { run_id, name } => {
+                println!("Saving run {run_id} as component '{name}'...");
+            }
+            ComponentCommands::Blocks => {
+                let mut family = "";
+                for b in sentinel_core::blocks::Block::all() {
+                    let i = b.info();
+                    if i.family != family {
+                        family = i.family;
+                        println!("\n[{family}]");
+                    }
+                    let params: Vec<String> = i
+                        .params
+                        .iter()
+                        .map(|p| if p.required { format!("{}*", p.name) } else { p.name.to_string() })
+                        .collect();
+                    println!(
+                        "  {:<20} in: {:<8} out: {:<9} params: {}",
+                        i.name,
+                        i.inputs.join(","),
+                        i.outputs.join(","),
+                        params.join(", ")
+                    );
+                    println!("      {}", i.description);
+                }
+                println!("\n(* = required parameter)");
+            }
+            ComponentCommands::Show { component, set } => {
+                let g = build_graph(&component, &set)?;
+                for (name, shape) in &g.spec.inputs {
+                    println!("input  {name:<14} {}", sentinel_core::graph::fmt_shape(shape));
+                }
+                for node in &g.order {
+                    let b = g.block(node);
+                    for port in b.outputs() {
+                        let shape = &g.shapes[&format!("{node}.{port}")];
+                        let ins: Vec<String> = b
+                            .inputs()
+                            .iter()
+                            .map(|p| g.wires[&(node.clone(), p.to_string())].key())
+                            .collect();
+                        println!(
+                            "node   {:<14} {:<20} {:<22} <- {}",
+                            format!("{node}.{port}"),
+                            b.name(),
+                            sentinel_core::graph::fmt_shape(shape),
+                            ins.join(", ")
+                        );
+                    }
+                }
+                for (name, src) in &g.outputs {
+                    println!("output {name:<14} = {}", src.key());
+                }
+            }
+            ComponentCommands::Compose { component, output, set, model_only } => {
+                let g = build_graph(&component, &set)?;
+                let code = if model_only {
+                    format!("import torch\nimport torch.nn as nn\n\n{}", sentinel_core::codegen::generate_model(&g))
+                } else {
+                    sentinel_core::codegen::generate_training_script(&g, &component)?
+                };
+                std::fs::write(&output, code)?;
+                println!("Composed '{component}' -> {output}");
+                println!("Run anywhere with PyTorch: python {output}");
             }
         },
-        Some(Commands::Export { format, template, output }) => {
-            println!("Exporting template '{template}' as pure standalone {format} to: {output}");
-            let mut registry = TemplateRegistry::new();
-            let _ = registry.load_from_dir(Path::new("templates"));
+        Some(Commands::Export { format, component, output }) => {
+            println!("Exporting component '{component}' as pure standalone {format} to: {output}");
+            let mut registry = ComponentRegistry::new();
+            let _ = registry.load_from_dir(Path::new("components"));
 
-            let tmpl = registry.get(&template).ok_or_else(|| {
-                anyhow::anyhow!("Template '{}' not found in registry", template)
+            let tmpl = registry.get(&component).ok_or_else(|| {
+                anyhow::anyhow!("Component '{}' not found in registry", component)
             })?;
 
             let resolved = tmpl.resolve_config(&HashMap::new())?;
@@ -199,7 +282,7 @@ async fn main() -> anyhow::Result<()> {
             println!("✨ Successfully created project '{name}'!");
             println!("\nNext steps:");
             println!("  cd {name}");
-            println!("  sentinel template list");
+            println!("  sentinel component list");
             println!("  sentinel dev");
         }
         Some(Commands::Init { path }) => {
@@ -215,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
             println!("✨ Successfully converted '{project_name}' into a Sentinel repository!");
             println!("   Generated: sentinel.lock (lockfile), sentinel.yaml, and machines.yaml");
             println!("\nNext steps:");
-            println!("   sentinel template list");
+            println!("   sentinel component list");
             println!("   sentinel dev");
         }
         None => {
@@ -227,21 +310,39 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Resolve a registry component (plus `--set k=v` overrides) into a validated graph.
+fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::graph::ValidatedGraph> {
+    let mut registry = ComponentRegistry::new();
+    let _ = registry.load_from_dir(Path::new("components"));
+    let c = registry
+        .get(component)
+        .ok_or_else(|| anyhow::anyhow!("Component '{component}' not found (see `sentinel component list`)"))?;
+    let mut overrides = HashMap::new();
+    for kv in set {
+        let (k, v) = kv
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--set expects KEY=VALUE, got '{kv}'"))?;
+        overrides.insert(k.to_string(), serde_yaml::from_str(v)?);
+    }
+    c.validate_overrides(&overrides)?;
+    Ok(c.build_graph(&overrides)?)
+}
+
 async fn run_dev(port: u16) -> anyhow::Result<()> {
     let supervisor = sentinel_daemon::supervisor::ProcessSupervisor::new();
     let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(4);
     let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(
         sentinel_daemon::scheduler::HardwareMonitor::new(),
     ));
-    let mut registry = TemplateRegistry::new();
-    let _ = registry.load_from_dir(Path::new("templates"));
-    let templates = std::sync::Arc::new(registry);
+    let mut registry = ComponentRegistry::new();
+    let _ = registry.load_from_dir(Path::new("components"));
+    let components = std::sync::Arc::new(registry);
 
     let state = sentinel_daemon::server::AppState {
         supervisor,
         gpu_pool,
         hardware_monitor,
-        templates,
+        components,
     };
 
     let app = sentinel_daemon::server::Server::router(state);

@@ -1,13 +1,13 @@
 use sentinel_core::config::HydraConfig;
-use sentinel_core::templates::{ParamSpec, ParamType, Template, TemplateError, TemplateRegistry};
+use sentinel_core::components::{ParamSpec, ParamType, Component, ComponentError, ComponentRegistry};
 use std::collections::HashMap;
 
 #[test]
 fn test_deep_three_level_inheritance() {
     let base_yaml = r#"
 schema_version: "1.0"
-template_id: "core/base@v1"
-name: "Base Root Template"
+component_id: "core/base@v1"
+name: "Base Root Component"
 description: "Root configuration"
 domain: "core"
 parameters:
@@ -23,9 +23,9 @@ locked:
 
     let vision_yaml = r#"
 schema_version: "1.0"
-template_id: "vision/intermediate@v1"
+component_id: "vision/intermediate@v1"
 name: "Vision Intermediate"
-description: "Intermediate vision template"
+description: "Intermediate vision component"
 domain: "vision"
 extends: "core/base@v1"
 parameters:
@@ -43,9 +43,9 @@ parameters:
 
     let custom_yaml = r#"
 schema_version: "1.0"
-template_id: "custom/leaf@v1"
-name: "Custom Leaf Template"
-description: "Concrete experiment template"
+component_id: "custom/leaf@v1"
+name: "Custom Leaf Component"
+description: "Concrete experiment component"
 domain: "vision"
 extends: "vision/intermediate@v1"
 parameters:
@@ -56,12 +56,12 @@ parameters:
     help: "Batch size"
 "#;
 
-    let base = Template::from_yaml(base_yaml).expect("parse base");
-    let vision = Template::from_yaml(vision_yaml).expect("parse vision");
-    let custom = Template::from_yaml(custom_yaml).expect("parse custom");
+    let base = Component::from_yaml(base_yaml).expect("parse base");
+    let vision = Component::from_yaml(vision_yaml).expect("parse vision");
+    let custom = Component::from_yaml(custom_yaml).expect("parse custom");
 
-    let mut registry = TemplateRegistry::new();
-    let _ = registry.load_from_dir(std::path::Path::new("templates"));
+    let mut registry = ComponentRegistry::new();
+    let _ = registry.load_from_dir(std::path::Path::new("components"));
 
     let mut temp_map = HashMap::new();
     temp_map.insert("core/base@v1".to_string(), base);
@@ -109,7 +109,7 @@ parameters:
         serde_yaml::Value::String("32-true".to_string()),
     );
     let err = resolved_leaf.validate_overrides(&overrides);
-    assert!(matches!(err, Err(TemplateError::LockedParameter(_))));
+    assert!(matches!(err, Err(ComponentError::LockedParameter(_))));
 }
 
 #[test]
@@ -136,9 +136,9 @@ fn test_param_type_validations() {
         },
     );
 
-    let template = Template {
+    let component = Component {
         schema_version: "1.0".to_string(),
-        template_id: "test/validation@v1".to_string(),
+        component_id: "test/validation@v1".to_string(),
         name: "Validation Test".to_string(),
         description: "Test".to_string(),
         domain: "test".to_string(),
@@ -148,6 +148,7 @@ fn test_param_type_validations() {
         locked: HashMap::new(),
         sweep: None,
         smoke_test: HashMap::new(),
+        graph: None,
     };
 
     // Valid overrides
@@ -160,7 +161,7 @@ fn test_param_type_validations() {
         "training.lr".to_string(),
         serde_yaml::Value::Number(serde_yaml::Number::from(0.005)),
     );
-    assert!(template.validate_overrides(&valid).is_ok());
+    assert!(component.validate_overrides(&valid).is_ok());
 
     // Invalid choice
     let mut invalid_choice = HashMap::new();
@@ -168,8 +169,8 @@ fn test_param_type_validations() {
         "optimizer.name".to_string(),
         serde_yaml::Value::String("rmsprop".to_string()),
     );
-    let err_choice = template.validate_overrides(&invalid_choice);
-    assert!(matches!(err_choice, Err(TemplateError::ValidationError(_))));
+    let err_choice = component.validate_overrides(&invalid_choice);
+    assert!(matches!(err_choice, Err(ComponentError::ValidationError(_))));
 
     // Out of range (too high)
     let mut too_high = HashMap::new();
@@ -177,8 +178,8 @@ fn test_param_type_validations() {
         "training.lr".to_string(),
         serde_yaml::Value::Number(serde_yaml::Number::from(0.5)),
     );
-    let err_high = template.validate_overrides(&too_high);
-    assert!(matches!(err_high, Err(TemplateError::OutOfRange(_, _, _, _))));
+    let err_high = component.validate_overrides(&too_high);
+    assert!(matches!(err_high, Err(ComponentError::OutOfRange(_, _, _, _))));
 
     // Out of range (too low)
     let mut too_low = HashMap::new();
@@ -186,8 +187,8 @@ fn test_param_type_validations() {
         "training.lr".to_string(),
         serde_yaml::Value::Number(serde_yaml::Number::from(0.0000001)),
     );
-    let err_low = template.validate_overrides(&too_low);
-    assert!(matches!(err_low, Err(TemplateError::OutOfRange(_, _, _, _))));
+    let err_low = component.validate_overrides(&too_low);
+    assert!(matches!(err_low, Err(ComponentError::OutOfRange(_, _, _, _))));
 }
 
 #[test]
@@ -223,17 +224,17 @@ fn test_deeply_nested_hydra_overrides() {
 
 #[test]
 fn test_malformed_yaml_error_handling() {
-    let bad_yaml = "template_id: [unclosed list";
-    let err = Template::from_yaml(bad_yaml);
-    assert!(matches!(err, Err(TemplateError::ParseError(_))));
+    let bad_yaml = "component_id: [unclosed list";
+    let err = Component::from_yaml(bad_yaml);
+    assert!(matches!(err, Err(ComponentError::ParseError(_))));
 
     let empty_id = r#"
 schema_version: "1.0"
-template_id: ""
+component_id: ""
 name: "Empty ID"
 description: "Test"
 domain: "test"
 "#;
-    let err_empty = Template::from_yaml(empty_id);
-    assert!(matches!(err_empty, Err(TemplateError::ValidationError(_))));
+    let err_empty = Component::from_yaml(empty_id);
+    assert!(matches!(err_empty, Err(ComponentError::ValidationError(_))));
 }

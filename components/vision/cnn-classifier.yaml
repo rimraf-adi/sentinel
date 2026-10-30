@@ -1,0 +1,31 @@
+schema_version: "1.0"
+component_id: "vision/cnn-classifier@v1"
+name: "CNN Classifier"
+description: "Two conv/pool stages then a linear head over image batches [B, C, H, W]"
+domain: "vision"
+parameters:
+  channels: {type: int, default: 3, range: [1, 64], help: "Input channels"}
+  size: {type: int, default: 32, range: [8, 512], help: "Image height/width"}
+  width: {type: int, default: 16, range: [4, 256], help: "First conv channels"}
+  classes: {type: int, default: 10, range: [2, 1000], help: "Number of classes"}
+graph:
+  inputs: {img: [B, "${channels}", "${size}", "${size}"]}
+  nodes:
+    conv1: {block: conv2d, params: {out_channels: "${width}", kernel: 3, padding: 1}}
+    act1:  {block: activation, params: {kind: relu}}
+    pool1: {block: maxpool2d}
+    conv2: {block: conv2d, params: {out_channels: 32, kernel: 3, padding: 1}}
+    act2:  {block: activation, params: {kind: relu}}
+    pool2: {block: maxpool2d}
+    flat:  {block: flatten}
+    head:  {block: linear, params: {out: "${classes}"}}
+  edges:
+    - img -> conv1
+    - conv1 -> act1
+    - act1 -> pool1
+    - pool1 -> conv2
+    - conv2 -> act2
+    - act2 -> pool2
+    - pool2 -> flat
+    - flat -> head
+  outputs: {logits: head}

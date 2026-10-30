@@ -1,0 +1,39 @@
+schema_version: "1.0"
+component_id: "tabular/ann-classifier@v1"
+name: "ANN Classifier"
+description: "Fully connected network (linear + relu blocks) for tabular classification"
+domain: "tabular"
+parameters:
+  features: {type: int, default: 2, range: [1, 4096], help: "Input feature count"}
+  classes: {type: int, default: 3, range: [2, 1000], help: "Number of classes"}
+  hidden: {type: int, default: 32, range: [2, 1024], help: "Hidden width"}
+  lr: {type: float, default: 0.01, range: [0.00001, 0.5], help: "Learning rate"}
+  epochs: {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
+  csv: {type: string, default: "data/demo.csv", help: "Training CSV (columns x1, x2, label)"}
+sweep:
+  optimizer: "optuna"
+  max_trials: 10
+  params:
+    lr: {type: float_log, min: 0.0001, max: 0.1}
+    hidden: {type: int, min: 8, max: 128}
+graph:
+  inputs: {x: [B, "${features}"]}
+  nodes:
+    fc1:  {block: linear, params: {out: "${hidden}"}}
+    act1: {block: activation, params: {kind: relu}}
+    fc2:  {block: linear, params: {out: "${hidden}"}}
+    act2: {block: activation, params: {kind: relu}}
+    head: {block: linear, params: {out: "${classes}"}}
+  edges:
+    - x -> fc1
+    - fc1 -> act1
+    - act1 -> fc2
+    - fc2 -> act2
+    - act2 -> head
+  outputs: {logits: head}
+  training:
+    loss: cross_entropy
+    optimizer: adam
+    lr: "${lr}"
+    epochs: "${epochs}"
+    data: {csv: "${csv}", features: [x1, x2], target: label}

@@ -1,0 +1,24 @@
+schema_version: "1.0"
+component_id: "graph/gcn-classifier@v1"
+name: "GCN Node Classifier"
+description: "Two graph-convolution blocks over node features and an adjacency matrix"
+domain: "graph"
+parameters:
+  features: {type: int, default: 16, range: [1, 4096], help: "Node feature size"}
+  hidden: {type: int, default: 32, range: [2, 1024], help: "Hidden width"}
+  classes: {type: int, default: 4, range: [2, 1000], help: "Node classes"}
+graph:
+  inputs:
+    x: [B, N, "${features}"]
+    adj: [B, N, N]
+  nodes:
+    g1:  {block: gcn, params: {out: "${hidden}"}}
+    act: {block: activation, params: {kind: relu}}
+    g2:  {block: gcn, params: {out: "${classes}"}}
+  edges:
+    - x -> g1.x
+    - adj -> g1.adj
+    - g1 -> act
+    - act -> g2.x
+    - adj -> g2.adj
+  outputs: {logits: g2}

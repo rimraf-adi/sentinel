@@ -1,5 +1,5 @@
 schema_version: "1.0"
-template_id: "tabular/mlp-classifier@v1"
+component_id: "tabular/mlp-classifier@v1"
 name: "Tabular MLP Classifier"
 description: "Structured data classification with multi-layer perceptron"
 domain: "tabular"

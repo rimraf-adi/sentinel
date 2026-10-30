@@ -17,7 +17,7 @@ impl ProjectScaffolder {
             "tasks",
             "models",
             "datasets",
-            "templates/custom",
+            "components/custom",
             "hooks",
             "tests",
         ];
@@ -50,8 +50,8 @@ runner:
         let sentinel_lock = format!(
             r#"# Sentinel Machine Lockfile (Auto-generated)
 tool_version: "0.1.0"
-template_id: "vision/image-classification@v1"
-template_version: 1
+component_id: "vision/image-classification@v1"
+component_version: 1
 created_at: "{}"
 answers:
   framework: "pytorch"
@@ -176,9 +176,9 @@ mlruns/
 "#;
         fs::write(target_dir.join(".gitignore"), gitignore)?;
 
-        // 10. templates/custom/my_template.yaml
-        let custom_template_yaml = r#"schema_version: "1.0"
-template_id: "custom/my-experiment@v1"
+        // 10. components/custom/my_component.yaml
+        let custom_component_yaml = r#"schema_version: "1.0"
+component_id: "custom/my-experiment@v1"
 name: "My Custom Experiment"
 description: "Custom recipe scaffolded for this repository"
 domain: "custom"
@@ -194,8 +194,8 @@ locked:
   tracking.backend: "mlflow"
 "#;
         fs::write(
-            target_dir.join("templates/custom/my_template.yaml"),
-            custom_template_yaml,
+            target_dir.join("components/custom/my_component.yaml"),
+            custom_component_yaml,
         )?;
 
         Ok(())
@@ -215,7 +215,7 @@ locked:
             "configs",
             "models",
             "datasets",
-            "templates/custom",
+            "components/custom",
             "hooks",
         ];
         for sub in &subdirs {
@@ -250,8 +250,8 @@ runner:
             let sentinel_lock = format!(
                 r#"# Sentinel Machine Lockfile (Auto-generated)
 tool_version: "0.1.0"
-template_id: "custom/starter@v1"
-template_version: 1
+component_id: "custom/starter@v1"
+component_version: 1
 created_at: "{}"
 answers:
   framework: "pytorch"
@@ -301,7 +301,7 @@ mod tests {
         assert!(temp_dir.join("configs/model/resnet18.yaml").exists());
         assert!(temp_dir.join("configs/dataset/synthetic.yaml").exists());
         assert!(temp_dir.join("models/example_model.py").exists());
-        assert!(temp_dir.join("templates/custom/my_template.yaml").exists());
+        assert!(temp_dir.join("components/custom/my_component.yaml").exists());
         assert!(temp_dir.join("pyproject.toml").exists());
         assert!(temp_dir.join(".gitignore").exists());
 

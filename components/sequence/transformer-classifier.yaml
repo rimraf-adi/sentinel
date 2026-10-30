@@ -1,0 +1,25 @@
+schema_version: "1.0"
+component_id: "sequence/transformer-classifier@v1"
+name: "Transformer Classifier"
+description: "Token embedding, transformer encoder, mean pooling, linear head"
+domain: "sequence"
+parameters:
+  vocab: {type: int, default: 1000, range: [2, 1000000], help: "Vocabulary size"}
+  dim: {type: int, default: 64, range: [8, 1024], help: "Model width (divisible by heads)"}
+  heads: {type: int, default: 4, range: [1, 16], help: "Attention heads"}
+  classes: {type: int, default: 2, range: [2, 1000], help: "Number of classes"}
+graph:
+  inputs: {tokens: [B, T]}
+  nodes:
+    embed: {block: embedding, params: {num_embeddings: "${vocab}", dim: "${dim}"}}
+    enc1:  {block: transformer_encoder, params: {heads: "${heads}"}}
+    enc2:  {block: transformer_encoder, params: {heads: "${heads}"}}
+    pool:  {block: mean_pool}
+    head:  {block: linear, params: {out: "${classes}"}}
+  edges:
+    - tokens -> embed
+    - embed -> enc1
+    - enc1 -> enc2
+    - enc2 -> pool
+    - pool -> head
+  outputs: {logits: head}

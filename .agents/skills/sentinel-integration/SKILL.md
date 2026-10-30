@@ -2,7 +2,7 @@
 name: sentinel-integration
 description: >-
   Operational guide and skill for autonomous agents to hook into Sentinel-powered
-  machine learning codebases. Covers environment detection, template lifecycle,
+  machine learning codebases. Covers environment detection, component lifecycle,
   job supervision, REST/WebSocket APIs, crash-immune logging with sentinel-sdk,
   and Optuna ASHA hyperparameter sweeps.
 ---
@@ -19,10 +19,10 @@ This skill provides autonomous AI coding agents with the instructions, tools, an
 2. **Strict Environment Rule (`uv`):**
    - All Python commands must be invoked using `uv run python ...`.
    - Never use global `pip` or unmanaged `python` that could corrupt the environment.
-3. **Reproducibility via Templates:**
-   - Always prefer defining or extending declarative templates in `templates/` over ad-hoc scripts.
+3. **Reproducibility via Components:**
+   - Always prefer defining or extending declarative components in `components/` over ad-hoc scripts.
 4. **Zero Lock-In:**
-   - Any template can be converted into pure bare PyTorch code at any time with `sentinel export script`.
+   - Any component can be converted into pure bare PyTorch code at any time with `sentinel export script`.
 
 ---
 
@@ -32,7 +32,7 @@ When an agent enters a workspace, execute the following detection routine:
 
 ```bash
 # Check if Sentinel is present
-if [ -f "sentinel.yaml" ] || [ -d "templates" ]; then
+if [ -f "sentinel.yaml" ] || [ -d "components" ]; then
     echo "Sentinel codebase detected."
 fi
 
@@ -47,16 +47,16 @@ curl -s http://localhost:2512/api/health || {
 
 ## Common Agent Workflows
 
-### 1. Inspecting & Validating Templates
+### 1. Inspecting & Validating Components
 
-Before starting a run, check the template catalog and validate parameter ranges:
+Before starting a run, check the component catalog and validate parameter ranges:
 
 ```bash
-# List available templates
-sentinel template list
+# List available components
+sentinel component list
 
-# Validate template parameters and locked fields
-sentinel template check templates/vision/image-classification.yaml
+# Validate component parameters and locked fields
+sentinel component check components/vision/image-classification.yaml
 ```
 
 ### 2. Launching an Experiment
@@ -64,10 +64,10 @@ sentinel template check templates/vision/image-classification.yaml
 To launch a training run, call the Axum REST API:
 
 ```bash
-curl -X POST http://localhost:2512/api/jobs/run-template \
+curl -X POST http://localhost:2512/api/jobs/run-component \
   -H "Content-Type: application/json" \
   -d '{
-    "template_id": "vision/image-classification@v1",
+    "component_id": "vision/image-classification@v1",
     "overrides": {
       "training.lr": 0.0003,
       "training.batch_size": 64,
@@ -109,7 +109,7 @@ uv run python recipes/sweep_orchestrator.py --trials 15 --max-epochs 10
 If the user wants code that runs without Sentinel installed:
 
 ```bash
-sentinel export script --template vision/image-classification@v1 > standalone_train.py
+sentinel export script --component vision/image-classification@v1 > standalone_train.py
 uv run python standalone_train.py
 ```
 

@@ -1,4 +1,4 @@
-//! Sentinel Template Engine & Custom Template Architecture.
+//! Sentinel Component Engine & Custom Component Architecture.
 
 use crate::config::HydraConfig;
 use serde::{Deserialize, Serialize};
@@ -7,14 +7,14 @@ use std::path::Path;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum TemplateError {
-    #[error("Template not found: {0}")]
+pub enum ComponentError {
+    #[error("Component not found: {0}")]
     NotFound(String),
-    #[error("Failed to parse template YAML: {0}")]
+    #[error("Failed to parse component YAML: {0}")]
     ParseError(#[from] serde_yaml::Error),
-    #[error("Template validation failed: {0}")]
+    #[error("Component validation failed: {0}")]
     ValidationError(String),
-    #[error("Parameter '{0}' is locked by template and cannot be overridden")]
+    #[error("Parameter '{0}' is locked by component and cannot be overridden")]
     LockedParameter(String),
     #[error("Parameter '{0}' value {1} out of allowed range [{2}, {3}]")]
     OutOfRange(String, f64, f64, f64),
@@ -47,9 +47,9 @@ pub struct ParamSpec {
     pub help: String,
 }
 
-/// Sweep configuration in template.
+/// Sweep configuration in component.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct TemplateSweep {
+pub struct ComponentSweep {
     pub optimizer: Option<String>,
     pub pruner: Option<String>,
     pub max_trials: Option<u32>,
@@ -58,12 +58,12 @@ pub struct TemplateSweep {
     pub params: HashMap<String, serde_yaml::Value>,
 }
 
-/// Complete declarative Sentinel template.
+/// Complete declarative Sentinel component.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Template {
+pub struct Component {
     #[serde(default = "default_schema_version")]
     pub schema_version: String,
-    pub template_id: String,
+    pub component_id: String,
     pub name: String,
     pub description: String,
     pub domain: String,
@@ -75,51 +75,92 @@ pub struct Template {
     #[serde(default)]
     pub locked: HashMap<String, serde_yaml::Value>,
     #[serde(default)]
-    pub sweep: Option<TemplateSweep>,
+    pub sweep: Option<ComponentSweep>,
     #[serde(default)]
     pub smoke_test: HashMap<String, serde_yaml::Value>,
+    /// Optional DAG of blocks; `${param}` placeholders resolve from `parameters`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph: Option<serde_yaml::Value>,
 }
 
 fn default_schema_version() -> String {
     "1.0".to_string()
 }
 
-impl Template {
-    pub fn from_yaml(content: &str) -> Result<Self, TemplateError> {
+impl Component {
+    pub fn from_yaml(content: &str) -> Result<Self, ComponentError> {
         let t: Self = serde_yaml::from_str(content)?;
         t.validate()?;
         Ok(t)
     }
 
-    pub fn to_yaml(&self) -> Result<String, TemplateError> {
+    pub fn to_yaml(&self) -> Result<String, ComponentError> {
         let yaml = serde_yaml::to_string(self)?;
         Ok(yaml)
     }
 
     /// Basic structural validation.
-    pub fn validate(&self) -> Result<(), TemplateError> {
-        if self.template_id.trim().is_empty() {
-            return Err(TemplateError::ValidationError(
-                "template_id cannot be empty".to_string(),
+    pub fn validate(&self) -> Result<(), ComponentError> {
+        if self.component_id.trim().is_empty() {
+            return Err(ComponentError::ValidationError(
+                "component_id cannot be empty".to_string(),
             ));
         }
         if self.name.trim().is_empty() {
-            return Err(TemplateError::ValidationError(
+            return Err(ComponentError::ValidationError(
                 "name cannot be empty".to_string(),
             ));
+        }
+        if self.graph.is_some() {
+            self.build_graph(&HashMap::new())
+                .map_err(|e| ComponentError::ValidationError(format!("graph: {e}")))?;
         }
         Ok(())
     }
 
-    /// Validate user overrides against template parameters and locked fields.
+    /// Resolve `${param}` placeholders (overrides > locked > defaults) and validate the graph.
+    pub fn build_graph(
+        &self,
+        overrides: &HashMap<String, serde_yaml::Value>,
+    ) -> Result<crate::graph::ValidatedGraph, crate::graph::GraphError> {
+        let raw = self
+            .graph
+            .as_ref()
+            .ok_or_else(|| crate::graph::GraphError::Parse("component has no graph".into()))?;
+        for k in overrides.keys() {
+            if !self.parameters.contains_key(k) && !self.locked.contains_key(k) {
+                let mut known: Vec<&str> = self.parameters.keys().map(|s| s.as_str()).collect();
+                known.sort();
+                return Err(crate::graph::GraphError::Parse(format!(
+                    "unknown parameter '{k}' for {} (known: {})",
+                    self.component_id,
+                    known.join(", ")
+                )));
+            }
+        }
+        let mut vars = std::collections::BTreeMap::new();
+        for (k, spec) in &self.parameters {
+            vars.insert(k.clone(), spec.default.clone());
+        }
+        for (k, v) in &self.locked {
+            vars.insert(k.clone(), v.clone());
+        }
+        for (k, v) in overrides {
+            vars.insert(k.clone(), v.clone());
+        }
+        let resolved = crate::graph::substitute(raw, &vars);
+        crate::graph::GraphSpec::from_value(resolved)?.validate()
+    }
+
+    /// Validate user overrides against component parameters and locked fields.
     pub fn validate_overrides(
         &self,
         overrides: &HashMap<String, serde_yaml::Value>,
-    ) -> Result<(), TemplateError> {
+    ) -> Result<(), ComponentError> {
         for (key, val) in overrides {
             // Check if parameter is locked
             if self.locked.contains_key(key) {
-                return Err(TemplateError::LockedParameter(key.clone()));
+                return Err(ComponentError::LockedParameter(key.clone()));
             }
 
             // Check range if parameter is defined and numeric
@@ -127,14 +168,14 @@ impl Template {
                 if let Some((min, max)) = spec.range {
                     if let Some(num) = val.as_f64() {
                         if num < min || num > max {
-                            return Err(TemplateError::OutOfRange(key.clone(), num, min, max));
+                            return Err(ComponentError::OutOfRange(key.clone(), num, min, max));
                         }
                     }
                 }
                 if spec.param_type == ParamType::Choice && !spec.options.is_empty() {
                     if let Some(s) = val.as_str() {
                         if !spec.options.iter().any(|opt| opt == s) {
-                            return Err(TemplateError::ValidationError(format!(
+                            return Err(ComponentError::ValidationError(format!(
                                 "Value '{s}' is not a valid option for parameter '{key}'. Allowed: {:?}",
                                 spec.options
                             )));
@@ -146,11 +187,11 @@ impl Template {
         Ok(())
     }
 
-    /// Resolve effective HydraConfig for a run by applying template defaults, locked fields, and user overrides.
+    /// Resolve effective HydraConfig for a run by applying component defaults, locked fields, and user overrides.
     pub fn resolve_config(
         &self,
         overrides: &HashMap<String, serde_yaml::Value>,
-    ) -> Result<HydraConfig, TemplateError> {
+    ) -> Result<HydraConfig, ComponentError> {
         self.validate_overrides(overrides)?;
 
         let mut config = HydraConfig {
@@ -177,26 +218,27 @@ impl Template {
     }
 }
 
-/// Registry to discover, load, and manage built-in and custom user templates.
+/// Registry to discover, load, and manage built-in and custom user components.
 #[derive(Debug, Default)]
-pub struct TemplateRegistry {
-    templates: HashMap<String, Template>,
+pub struct ComponentRegistry {
+    components: HashMap<String, Component>,
 }
 
-impl TemplateRegistry {
+impl ComponentRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
-            templates: HashMap::new(),
+            components: HashMap::new(),
         };
         registry.register_builtins();
+        registry.register_graph_builtins();
         registry
     }
 
-    /// Register default reference templates.
+    /// Register default reference components.
     pub fn register_builtins(&mut self) {
         let vision_yaml = r#"
 schema_version: "1.0"
-template_id: "vision/image-classification@v1"
+component_id: "vision/image-classification@v1"
 name: "Vision Classification"
 description: "Image classification with ResNet/ViT, AMP, and cosine scheduling"
 domain: "vision"
@@ -244,13 +286,13 @@ smoke_test:
   training.limit_val_batches: 2
   device: "cpu"
 "#;
-        if let Ok(t) = Template::from_yaml(vision_yaml) {
-            self.templates.insert(t.template_id.clone(), t);
+        if let Ok(t) = Component::from_yaml(vision_yaml) {
+            self.components.insert(t.component_id.clone(), t);
         }
 
         let custom_runner_yaml = r#"
 schema_version: "1.0"
-template_id: "custom/command-runner@v1"
+component_id: "custom/command-runner@v1"
 name: "Custom Command Runner"
 description: "Zero-touch adapter for existing scripts like 'python train.py'"
 domain: "custom"
@@ -265,13 +307,29 @@ locked:
 smoke_test:
   command: "python -c 'print(\"smoke test passed\")'"
 "#;
-        if let Ok(t) = Template::from_yaml(custom_runner_yaml) {
-            self.templates.insert(t.template_id.clone(), t);
+        if let Ok(t) = Component::from_yaml(custom_runner_yaml) {
+            self.components.insert(t.component_id.clone(), t);
         }
     }
 
-    /// Load custom templates from a filesystem directory.
-    pub fn load_from_dir(&mut self, dir: &Path) -> Result<usize, TemplateError> {
+    /// Graph components shipped inside the binary so every project has the block library.
+    pub fn register_graph_builtins(&mut self) {
+        const SHIPPED: &[&str] = &[
+            include_str!("../../../components/tabular/ann-classifier.yaml"),
+            include_str!("../../../components/tabular/residual-mlp.yaml"),
+            include_str!("../../../components/sequence/lstm-classifier.yaml"),
+            include_str!("../../../components/sequence/transformer-classifier.yaml"),
+            include_str!("../../../components/vision/cnn-classifier.yaml"),
+            include_str!("../../../components/graph/gcn-classifier.yaml"),
+        ];
+        for y in SHIPPED {
+            let c = Component::from_yaml(y).expect("shipped graph component must be valid");
+            self.components.insert(c.component_id.clone(), c);
+        }
+    }
+
+    /// Load custom components from a filesystem directory.
+    pub fn load_from_dir(&mut self, dir: &Path) -> Result<usize, ComponentError> {
         if !dir.exists() || !dir.is_dir() {
             return Ok(0);
         }
@@ -284,89 +342,93 @@ smoke_test:
                 if let Some(ext) = path.extension() {
                     if ext == "yaml" || ext == "yml" {
                         let content = std::fs::read_to_string(&path)?;
-                        if let Ok(t) = Template::from_yaml(&content) {
-                            self.templates.insert(t.template_id.clone(), t);
+                        if let Ok(t) = Component::from_yaml(&content) {
+                            self.components.insert(t.component_id.clone(), t);
                             count += 1;
                         }
                     }
                 }
             } else if path.is_dir() {
-                // Recursively check subdirectories (e.g. templates/custom/)
+                // Recursively check subdirectories (e.g. components/custom/)
                 count += self.load_from_dir(&path)?;
             }
         }
         Ok(count)
     }
 
-    pub fn get(&self, template_id: &str) -> Option<&Template> {
-        self.templates.get(template_id)
+    pub fn get(&self, component_id: &str) -> Option<&Component> {
+        self.components.get(component_id)
     }
 
-    pub fn list(&self) -> Vec<&Template> {
-        let mut list: Vec<&Template> = self.templates.values().collect();
-        list.sort_by(|a, b| a.template_id.cmp(&b.template_id));
+    pub fn list(&self) -> Vec<&Component> {
+        let mut list: Vec<&Component> = self.components.values().collect();
+        list.sort_by(|a, b| a.component_id.cmp(&b.component_id));
         list
     }
 
-    /// Resolve inheritance if template extends another.
-    pub fn resolve_inheritance(&self, template: &Template) -> Result<Template, TemplateError> {
-        if let Some(ref parent_id) = template.extends {
+    /// Resolve inheritance if component extends another.
+    pub fn resolve_inheritance(&self, component: &Component) -> Result<Component, ComponentError> {
+        if let Some(ref parent_id) = component.extends {
             let parent = self
                 .get(parent_id)
-                .ok_or_else(|| TemplateError::NotFound(parent_id.clone()))?;
+                .ok_or_else(|| ComponentError::NotFound(parent_id.clone()))?;
 
             let parent_resolved = self.resolve_inheritance(parent)?;
 
             let mut merged = parent_resolved.clone();
-            merged.template_id = template.template_id.clone();
-            merged.name = template.name.clone();
-            merged.description = template.description.clone();
-            merged.domain = template.domain.clone();
+            merged.component_id = component.component_id.clone();
+            merged.name = component.name.clone();
+            merged.description = component.description.clone();
+            merged.domain = component.domain.clone();
             merged.extends = None;
 
             // Merge defaults
-            for d in &template.defaults {
+            for d in &component.defaults {
                 merged.defaults.push(d.clone());
             }
 
             // Merge parameters
-            for (k, v) in &template.parameters {
+            for (k, v) in &component.parameters {
                 merged.parameters.insert(k.clone(), v.clone());
             }
 
             // Merge locked fields
-            for (k, v) in &template.locked {
+            for (k, v) in &component.locked {
                 merged.locked.insert(k.clone(), v.clone());
             }
 
-            if template.sweep.is_some() {
-                merged.sweep = template.sweep.clone();
+            if component.sweep.is_some() {
+                merged.sweep = component.sweep.clone();
             }
 
-            for (k, v) in &template.smoke_test {
+            for (k, v) in &component.smoke_test {
                 merged.smoke_test.insert(k.clone(), v.clone());
+            }
+
+            if component.graph.is_some() {
+                merged.graph = component.graph.clone();
             }
 
             Ok(merged)
         } else {
-            Ok(template.clone())
+            Ok(component.clone())
         }
     }
 
-    /// Generate starter template content for user authoring.
+    /// Generate starter component content for user authoring.
     pub fn create_custom_starter(
         name: &str,
         domain: &str,
         parent_id: Option<&str>,
-    ) -> Result<String, TemplateError> {
+    ) -> Result<String, ComponentError> {
         let clean_id = name.to_lowercase().replace(' ', "-");
-        let template_id = format!("custom/{clean_id}@v1");
+        let component_id = format!("custom/{clean_id}@v1");
 
-        let mut starter = Template {
+        let mut starter = Component {
             schema_version: "1.0".to_string(),
-            template_id,
+            component_id,
             name: name.to_string(),
-            description: format!("Custom template for {name}"),
+            description: format!("Custom component for {name}"),
             domain: domain.to_string(),
             extends: parent_id.map(|s| s.to_string()),
             defaults: vec![serde_yaml::Value::String("_self_".to_string())],
@@ -374,6 +436,7 @@ smoke_test:
             locked: HashMap::new(),
             sweep: None,
             smoke_test: HashMap::new(),
+            graph: None,
         };
 
         starter.parameters.insert(
@@ -390,20 +453,20 @@ smoke_test:
         starter.to_yaml()
     }
 
-    /// Freeze a winning run into a reusable custom template.
-    pub fn save_run_as_template(
-        template_name: &str,
+    /// Freeze a winning run into a reusable custom component.
+    pub fn save_run_as_component(
+        component_name: &str,
         domain: &str,
         resolved_config: &HydraConfig,
-    ) -> Result<String, TemplateError> {
-        let clean_id = template_name.to_lowercase().replace(' ', "-");
-        let template_id = format!("custom/{clean_id}@v1");
+    ) -> Result<String, ComponentError> {
+        let clean_id = component_name.to_lowercase().replace(' ', "-");
+        let component_id = format!("custom/{clean_id}@v1");
 
-        let mut t = Template {
+        let mut t = Component {
             schema_version: "1.0".to_string(),
-            template_id,
-            name: template_name.to_string(),
-            description: format!("Frozen template captured from run"),
+            component_id,
+            name: component_name.to_string(),
+            description: format!("Frozen component captured from run"),
             domain: domain.to_string(),
             extends: None,
             defaults: resolved_config.defaults.clone(),
@@ -411,6 +474,7 @@ smoke_test:
             locked: HashMap::new(),
             sweep: None,
             smoke_test: HashMap::new(),
+            graph: None,
         };
 
         for (k, v) in &resolved_config.values {
@@ -426,18 +490,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_builtin_templates_registered() {
-        let registry = TemplateRegistry::new();
+    fn test_builtin_components_registered() {
+        let registry = ComponentRegistry::new();
         assert!(registry.get("vision/image-classification@v1").is_some());
         assert!(registry.get("custom/command-runner@v1").is_some());
     }
 
     #[test]
     fn test_override_locked_parameter_fails() {
-        let registry = TemplateRegistry::new();
-        let template = registry
+        let registry = ComponentRegistry::new();
+        let component = registry
             .get("vision/image-classification@v1")
-            .expect("find vision template");
+            .expect("find vision component");
 
         let mut overrides = HashMap::new();
         overrides.insert(
@@ -445,16 +509,16 @@ mod tests {
             serde_yaml::Value::String("32-true".to_string()),
         );
 
-        let err = template.validate_overrides(&overrides);
-        assert!(matches!(err, Err(TemplateError::LockedParameter(_))));
+        let err = component.validate_overrides(&overrides);
+        assert!(matches!(err, Err(ComponentError::LockedParameter(_))));
     }
 
     #[test]
     fn test_override_out_of_range_fails() {
-        let registry = TemplateRegistry::new();
-        let template = registry
+        let registry = ComponentRegistry::new();
+        let component = registry
             .get("vision/image-classification@v1")
-            .expect("find vision template");
+            .expect("find vision component");
 
         let mut overrides = HashMap::new();
         overrides.insert(
@@ -462,27 +526,27 @@ mod tests {
             serde_yaml::Value::Number(serde_yaml::Number::from(10.0)),
         ); // max is 0.1
 
-        let err = template.validate_overrides(&overrides);
-        assert!(matches!(err, Err(TemplateError::OutOfRange(_, _, _, _))));
+        let err = component.validate_overrides(&overrides);
+        assert!(matches!(err, Err(ComponentError::OutOfRange(_, _, _, _))));
     }
 
     #[test]
-    fn test_custom_template_starter_and_resolution() {
-        let yaml = TemplateRegistry::create_custom_starter(
+    fn test_custom_component_starter_and_resolution() {
+        let yaml = ComponentRegistry::create_custom_starter(
             "My Fine Tuner",
             "llm",
             Some("vision/image-classification@v1"),
         )
         .expect("create custom starter");
 
-        let custom = Template::from_yaml(&yaml).expect("parse custom template");
-        assert_eq!(custom.template_id, "custom/my-fine-tuner@v1");
+        let custom = Component::from_yaml(&yaml).expect("parse custom component");
+        assert_eq!(custom.component_id, "custom/my-fine-tuner@v1");
         assert_eq!(
             custom.extends,
             Some("vision/image-classification@v1".to_string())
         );
 
-        let registry = TemplateRegistry::new();
+        let registry = ComponentRegistry::new();
         let resolved = registry
             .resolve_inheritance(&custom)
             .expect("resolve inheritance");
@@ -494,7 +558,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_run_as_template() {
+    fn test_save_run_as_component() {
         let mut config = HydraConfig::default();
         config.defaults.push(serde_yaml::Value::String("model: resnet50".to_string()));
         config.values.insert(
@@ -502,10 +566,10 @@ mod tests {
             serde_yaml::Value::Number(serde_yaml::Number::from(0.0005)),
         );
 
-        let yaml = TemplateRegistry::save_run_as_template("Winning Sweep Run", "vision", &config)
-            .expect("save run as template");
-        let parsed = Template::from_yaml(&yaml).expect("parse frozen template");
-        assert_eq!(parsed.template_id, "custom/winning-sweep-run@v1");
+        let yaml = ComponentRegistry::save_run_as_component("Winning Sweep Run", "vision", &config)
+            .expect("save run as component");
+        let parsed = Component::from_yaml(&yaml).expect("parse frozen component");
+        assert_eq!(parsed.component_id, "custom/winning-sweep-run@v1");
         assert!(parsed.locked.contains_key("training.lr"));
     }
 }

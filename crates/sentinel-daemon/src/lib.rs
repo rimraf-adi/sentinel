@@ -3,3 +3,5 @@
 pub mod supervisor;
 pub mod scheduler;
 pub mod server;
+pub mod assets;
+pub mod workspace;

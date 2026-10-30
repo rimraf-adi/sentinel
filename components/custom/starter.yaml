@@ -1,7 +1,7 @@
 schema_version: "1.0"
-template_id: "custom/starter@v1"
-name: "Custom Template Starter"
-description: "Starter template for user-defined training recipes"
+component_id: "custom/starter@v1"
+name: "Custom Component Starter"
+description: "Starter component for user-defined training recipes"
 domain: "custom"
 defaults:
   - _self_

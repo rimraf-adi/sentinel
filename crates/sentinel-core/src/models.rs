@@ -35,7 +35,7 @@ pub struct JobSpec {
     pub name: String,
     pub run_mode: RunMode,
     pub command: Option<String>,
-    pub template_id: Option<String>,
+    pub component_id: Option<String>,
     pub parameters: HashMap<String, serde_json::Value>,
     pub env_vars: HashMap<String, String>,
     pub gpu_ids: Vec<u32>,
@@ -50,7 +50,7 @@ impl JobSpec {
             name: name.into(),
             run_mode,
             command: None,
-            template_id: None,
+            component_id: None,
             parameters: HashMap::new(),
             env_vars: HashMap::new(),
             gpu_ids: Vec::new(),
@@ -64,8 +64,8 @@ impl JobSpec {
         self
     }
 
-    pub fn with_template(mut self, template_id: impl Into<String>) -> Self {
-        self.template_id = Some(template_id.into());
+    pub fn with_component(mut self, component_id: impl Into<String>) -> Self {
+        self.component_id = Some(component_id.into());
         self
     }
 
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn test_job_spec_serde_roundtrip() {
         let mut spec = JobSpec::new("cifar10-baseline", RunMode::Framework)
-            .with_template("vision/image-classification@v1")
+            .with_component("vision/image-classification@v1")
             .with_gpus(vec![0, 1]);
         spec.parameters
             .insert("lr".to_string(), serde_json::json!(0.0003));

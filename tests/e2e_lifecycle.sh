@@ -21,21 +21,21 @@ test -f sentinel.lock || { echo "❌ Missing sentinel.lock"; exit 1; }
 test -f pyproject.toml || { echo "❌ Missing pyproject.toml"; exit 1; }
 echo "✅ Project files successfully created."
 
-# 2. Template management
-echo "Step 2: Listing templates..."
-"$SENTINEL_BIN" template list
+# 2. Component management
+echo "Step 2: Listing components..."
+"$SENTINEL_BIN" component list
 
-echo "Step 3: Creating custom template..."
-"$SENTINEL_BIN" template new "Transfer Learning" --domain vision --extends "vision/image-classification@v1"
-test -f templates/transfer-learning.yaml || { echo "❌ Failed to create custom template"; exit 1; }
+echo "Step 3: Creating custom component..."
+"$SENTINEL_BIN" component new "Transfer Learning" --domain vision --extends "vision/image-classification@v1"
+test -f components/transfer-learning.yaml || { echo "❌ Failed to create custom component"; exit 1; }
 
-echo "Step 4: Validating custom template..."
-"$SENTINEL_BIN" template check templates/transfer-learning.yaml
-echo "✅ Custom template verified."
+echo "Step 4: Validating custom component..."
+"$SENTINEL_BIN" component check components/transfer-learning.yaml
+echo "✅ Custom component verified."
 
 # 3. Export standalone script
 echo "Step 5: Exporting standalone pure bare PyTorch script..."
-"$SENTINEL_BIN" export script --template vision/image-classification@v1 --output run_standalone.py
+"$SENTINEL_BIN" export script --component vision/image-classification@v1 --output run_standalone.py
 test -f run_standalone.py || { echo "❌ Failed to export standalone script"; exit 1; }
 echo "✅ Standalone script exported."
 

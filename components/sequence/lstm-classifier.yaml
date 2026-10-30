@@ -1,0 +1,32 @@
+schema_version: "1.0"
+component_id: "sequence/lstm-classifier@v1"
+name: "LSTM Classifier"
+description: "Reshapes features into a sequence, runs an LSTM block, classifies from the last hidden state"
+domain: "sequence"
+parameters:
+  features: {type: int, default: 2, range: [1, 4096], help: "Flat input feature count (= seq_len * step_features)"}
+  seq_len: {type: int, default: 2, range: [1, 4096], help: "Time steps"}
+  step_features: {type: int, default: 1, range: [1, 4096], help: "Features per time step"}
+  hidden: {type: int, default: 32, range: [2, 1024], help: "LSTM hidden size"}
+  layers: {type: int, default: 1, range: [1, 8], help: "Stacked LSTM layers"}
+  classes: {type: int, default: 3, range: [2, 1000], help: "Number of classes"}
+  lr: {type: float, default: 0.01, range: [0.00001, 0.5], help: "Learning rate"}
+  epochs: {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
+  csv: {type: string, default: "data/demo.csv", help: "Training CSV (columns x1, x2, label)"}
+graph:
+  inputs: {x: [B, "${features}"]}
+  nodes:
+    seq:  {block: reshape, params: {shape: ["${seq_len}", "${step_features}"]}}
+    rnn:  {block: lstm, params: {hidden: "${hidden}", layers: "${layers}"}}
+    head: {block: linear, params: {out: "${classes}"}}
+  edges:
+    - x -> seq
+    - seq -> rnn
+    - rnn.last -> head
+  outputs: {logits: head}
+  training:
+    loss: cross_entropy
+    optimizer: adam
+    lr: "${lr}"
+    epochs: "${epochs}"
+    data: {csv: "${csv}", features: [x1, x2], target: label}

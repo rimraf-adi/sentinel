@@ -5,12 +5,11 @@ use crate::supervisor::ProcessSupervisor;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Json};
+use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 use axum::Router;
 use sentinel_core::models::{HardwareStats, JobRecord, JobSpec, RunMode};
-use sentinel_core::templates::TemplateRegistry;
-use sentinel_ui::{DashboardState, DashboardView};
+use sentinel_core::components::ComponentRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -26,7 +25,7 @@ pub struct AppState {
     pub supervisor: ProcessSupervisor,
     pub gpu_pool: DynamicGpuPool,
     pub hardware_monitor: Arc<Mutex<HardwareMonitor>>,
-    pub templates: Arc<TemplateRegistry>,
+    pub components: Arc<ComponentRegistry>,
 }
 
 pub struct Server;
@@ -35,16 +34,19 @@ impl Server {
     /// Create router with all Sentinel Daemon REST & WebSocket endpoints.
     pub fn router(state: AppState) -> Router {
         Router::new()
-            .route("/", get(dashboard_page))
             .route("/favicon.ico", get(favicon_handler))
             .route("/api/health", get(health_check))
             .route("/api/jobs", get(list_jobs).post(submit_job))
-            .route("/api/jobs/run-template", post(run_template_job))
+            .route("/api/jobs/run-component", post(run_component_job))
             .route("/api/jobs/:id", get(get_job))
             .route("/api/jobs/:id/stop", post(stop_job))
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
-            .route("/api/templates", get(list_templates))
+            .route("/api/blocks", get(list_blocks))
+            .route("/api/graph/validate", post(graph_validate))
+            .route("/api/graph/compose", post(graph_compose))
+            .route("/api/graph/run", post(graph_run))
+            .route("/api/components", get(list_components))
             .route("/api/datasets", get(list_datasets).post(add_dataset))
             .route("/api/datasets/:name", axum::routing::delete(remove_dataset))
             .route("/api/repo/status", get(get_repo_status))
@@ -52,6 +54,7 @@ impl Server {
             .route("/api/files", get(list_files))
             .route("/api/files/content", get(get_file_content))
             .route("/ws/live", get(ws_handler))
+            .fallback(crate::assets::static_handler)
             .layer(CorsLayer::permissive())
             .with_state(state)
     }
@@ -82,18 +85,6 @@ impl Server {
     }
 }
 
-async fn dashboard_page(State(state): State<AppState>) -> Html<String> {
-    let stats = state.hardware_monitor.lock().await.collect_stats("local");
-    let jobs = state.supervisor.list_jobs().await;
-    let templates: Vec<_> = state.templates.list().into_iter().cloned().collect();
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let canonical = cwd.canonicalize().unwrap_or(cwd);
-    let datasets = sentinel_core::storage::DatasetRegistry::load_all(&canonical);
-    let ui_state = DashboardState::new();
-
-    let html = DashboardView::render_html(&ui_state, Some(&stats), &jobs, &templates, &datasets);
-    Html(html)
-}
 
 async fn favicon_handler() -> impl IntoResponse {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#ffffff"/><polygon points="16,7 25,23 7,23" fill="#000000"/></svg>"##;
@@ -135,28 +126,28 @@ async fn submit_job(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RunTemplateRequest {
-    pub template_id: String,
+pub struct RunComponentRequest {
+    pub component_id: String,
     #[serde(default)]
     pub overrides: HashMap<String, serde_yaml::Value>,
 }
 
-async fn run_template_job(
+async fn run_component_job(
     State(state): State<AppState>,
-    Json(req): Json<RunTemplateRequest>,
+    Json(req): Json<RunComponentRequest>,
 ) -> Result<Json<JobRecord>, (StatusCode, String)> {
-    let template = state
-        .templates
-        .get(&req.template_id)
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Template '{}' not found", req.template_id)))?;
+    let component = state
+        .components
+        .get(&req.component_id)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Component '{}' not found", req.component_id)))?;
 
-    // Validate user overrides against template schema
-    template
+    // Validate user overrides against component schema
+    component
         .validate_overrides(&req.overrides)
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
 
-    let mut spec = JobSpec::new(format!("job-{}", template.name), RunMode::Framework);
-    spec.template_id = Some(req.template_id.clone());
+    let mut spec = JobSpec::new(format!("job-{}", component.name), RunMode::Framework);
+    spec.component_id = Some(req.component_id.clone());
 
     for (k, v) in &req.overrides {
         let json_val = serde_json::to_value(v).unwrap_or(serde_json::Value::Null);
@@ -217,9 +208,9 @@ async fn get_hardware(State(state): State<AppState>) -> Json<HardwareStats> {
     Json(stats)
 }
 
-async fn list_templates(State(state): State<AppState>) -> impl IntoResponse {
-    let templates: Vec<_> = state.templates.list().into_iter().cloned().collect();
-    Json(templates)
+async fn list_components(State(state): State<AppState>) -> impl IntoResponse {
+    let components: Vec<_> = state.components.list().into_iter().cloned().collect();
+    Json(components)
 }
 
 #[derive(Serialize)]
@@ -246,11 +237,11 @@ async fn list_files() -> impl IntoResponse {
         "FILES.md",
         "recipes/vision_train.py",
         "recipes/sweep_orchestrator.py",
-        "templates/vision/image-classification.yaml",
-        "templates/custom/command-runner.yaml",
-        "templates/custom/starter.yaml",
-        "templates/llm/lora-finetune.yaml",
-        "templates/tabular/mlp-classifier.yaml",
+        "components/vision/image-classification.yaml",
+        "components/custom/command-runner.yaml",
+        "components/custom/starter.yaml",
+        "components/llm/lora-finetune.yaml",
+        "components/tabular/mlp-classifier.yaml",
         "packages/sentinel-sdk/src/sentinel/__init__.py",
     ];
 
@@ -425,21 +416,21 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
 }
 
 async fn get_repo_status() -> impl IntoResponse {
-    let ui_state = sentinel_ui::DashboardState::new();
-    let lock_found = ui_state.is_sentinel_repo;
+    let ws = crate::workspace::WorkspaceInfo::detect();
+    let lock_found = ws.is_sentinel_repo;
 
     Json(json!({
         "is_sentinel_repo": lock_found,
         "lock_file_found": lock_found,
         "lock_file_path": "sentinel.lock",
-        "workspace_name": ui_state.workspace_name,
-        "workspace_path": ui_state.workspace_path,
-        "full_workspace_path": ui_state.full_workspace_path,
-        "git_branch": ui_state.git_branch,
-        "git_clean": ui_state.git_clean,
+        "workspace_name": ws.workspace_name,
+        "workspace_path": ws.workspace_path,
+        "full_workspace_path": ws.full_workspace_path,
+        "git_branch": ws.git_branch,
+        "git_clean": ws.git_clean,
         "convert_commands": [
             "sentinel init",
-            "sentinel template new my-recipe",
+            "sentinel component new my-recipe",
             "sentinel dev"
         ]
     }))
@@ -464,4 +455,150 @@ async fn init_repo() -> Result<Json<serde_json::Value>, (StatusCode, String)> {
         "status": "ok",
         "message": "Repository successfully converted to Sentinel repository."
     })))
+}
+
+// ---------------------------------------------------------------------------
+// Component graphs: block catalog, validation, compilation, execution
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct GraphRequest {
+    /// Registered component to build, or...
+    pub component_id: Option<String>,
+    /// ...an ad-hoc graph (e.g. from the canvas editor).
+    pub graph: Option<serde_json::Value>,
+    #[serde(default)]
+    pub overrides: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub model_only: bool,
+}
+
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+fn api_err(code: StatusCode, msg: impl ToString) -> ApiError {
+    (code, Json(json!({ "ok": false, "error": msg.to_string() })))
+}
+
+fn resolve_graph(
+    state: &AppState,
+    req: &GraphRequest,
+) -> Result<(String, sentinel_core::graph::ValidatedGraph), ApiError> {
+    if let Some(id) = &req.component_id {
+        let c = state
+            .components
+            .get(id)
+            .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("Component '{id}' not found")))?;
+        let mut ov = HashMap::new();
+        for (k, v) in &req.overrides {
+            let y = serde_yaml::to_value(v).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+            ov.insert(k.clone(), y);
+        }
+        c.validate_overrides(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+        let g = c.build_graph(&ov).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+        Ok((id.clone(), g))
+    } else if let Some(raw) = &req.graph {
+        let spec: sentinel_core::graph::GraphSpec = serde_json::from_value(raw.clone())
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("invalid graph: {e}")))?;
+        let g = spec.validate().map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+        Ok(("canvas".to_string(), g))
+    } else {
+        Err(api_err(StatusCode::BAD_REQUEST, "provide either component_id or graph"))
+    }
+}
+
+async fn list_blocks() -> impl IntoResponse {
+    let blocks: Vec<_> = sentinel_core::blocks::Block::all().iter().map(|b| b.info()).collect();
+    Json(blocks)
+}
+
+/// Validation is a query: an invalid graph is a normal `200 {ok: false, error}` answer
+/// (the editor asks on every edit), not an HTTP error.
+async fn graph_validate(State(state): State<AppState>, Json(req): Json<GraphRequest>) -> Json<serde_json::Value> {
+    match validate_graph(&state, &req) {
+        Ok(v) => Json(v),
+        Err((_, Json(e))) => Json(e),
+    }
+}
+
+fn validate_graph(state: &AppState, req: &GraphRequest) -> Result<serde_json::Value, ApiError> {
+    use sentinel_core::graph::Dim;
+    let (id, g) = resolve_graph(state, req)?;
+    let dims = |s: &Vec<Dim>| s.iter().map(|d| d.to_string()).collect::<Vec<_>>();
+    let mut nodes = serde_json::Map::new();
+    for n in &g.order {
+        let b = g.block(n);
+        let outs: serde_json::Map<String, serde_json::Value> = b
+            .outputs()
+            .iter()
+            .map(|p| (p.to_string(), json!(dims(&g.shapes[&format!("{n}.{p}")]))))
+            .collect();
+        let ins: serde_json::Map<String, serde_json::Value> = b
+            .inputs()
+            .iter()
+            .map(|p| (p.to_string(), json!(g.wires[&(n.clone(), p.to_string())].key())))
+            .collect();
+        nodes.insert(n.clone(), json!({ "block": b.name(), "inputs": ins, "outputs": outs }));
+    }
+    let inputs: serde_json::Map<String, serde_json::Value> =
+        g.spec.inputs.iter().map(|(k, v)| (k.clone(), json!(dims(v)))).collect();
+    let outputs: serde_json::Map<String, serde_json::Value> =
+        g.outputs.iter().map(|(k, v)| (k.clone(), json!(v.key()))).collect();
+    Ok(json!({
+        "ok": true, "id": id, "order": g.order, "inputs": inputs, "nodes": nodes, "outputs": outputs,
+        "trainable": g.spec.training.is_some(),
+        "spec": serde_json::to_value(&g.spec).unwrap_or(serde_json::Value::Null),
+        "params": serde_json::to_value(&g.params).unwrap_or(serde_json::Value::Null),
+    }))
+}
+
+fn compile(g: &sentinel_core::graph::ValidatedGraph, id: &str, model_only: bool) -> Result<String, ApiError> {
+    if model_only {
+        Ok(format!(
+            "import torch\nimport torch.nn as nn\n\n{}",
+            sentinel_core::codegen::generate_model(g)
+        ))
+    } else {
+        sentinel_core::codegen::generate_training_script(g, id).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+    }
+}
+
+async fn graph_compose(
+    State(state): State<AppState>,
+    Json(req): Json<GraphRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (id, g) = resolve_graph(&state, &req)?;
+    let code = compile(&g, &id, req.model_only)?;
+    Ok(Json(json!({ "ok": true, "id": id, "code": code })))
+}
+
+async fn graph_run(
+    State(state): State<AppState>,
+    Json(req): Json<GraphRequest>,
+) -> Result<Json<JobRecord>, ApiError> {
+    let (id, g) = resolve_graph(&state, &req)?;
+    let code = compile(&g, &id, false)?;
+
+    let dir = std::env::current_dir()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?
+        .join(".sentinel")
+        .join("generated");
+    std::fs::create_dir_all(&dir).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let file_stem: String = id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let script = dir.join(format!("{file_stem}.py"));
+    std::fs::write(&script, code).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let mut spec = JobSpec::new(format!("graph-{id}"), RunMode::Command);
+    spec.component_id = Some(id.clone());
+    spec.command = Some(format!("python3 '{}'", script.display()));
+    if let Ok(sdk) = std::env::var("SENTINEL_SDK_PATH") {
+        spec.env_vars.insert("PYTHONPATH".into(), sdk);
+    }
+    spec.working_dir = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| ".".into());
+
+    state
+        .supervisor
+        .start_job(spec)
+        .await
+        .map(Json)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))
 }

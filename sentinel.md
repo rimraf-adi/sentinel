@@ -53,25 +53,25 @@ So:
 
 ### Product shape
 
-**IDE + scheduler + monitor + templates = less repeat work.** The whole process becomes a template. User pick a template, change a few fields, press run.
+**IDE + scheduler + monitor + components = less repeat work.** The whole process becomes a component. User pick a component, change a few fields, press run.
 
 | Pillar | What it do | How we build it |
 | --- | --- | --- |
 | Workspace (Web UI) | Ultra-light web editor for configs and scripts. Open read-only by default. Click to edit. Idle drop back to read-only. Near-zero RAM. | Pure Rust Leptos / Dioxus via WASM |
 | Scheduler | Queue, priority, GPU fit, retry, sweeps, pipelines. Dynamic GPU worker pool. | Rust daemon from Day 1 |
 | Monitor | Live curves, logs, GPU stats, alerts. Watch jobs on remote machines from laptop. | Rust daemon + small Rust agent on each machine |
-| Templates | Reusable recipe of the whole process: data, model, train, tune, eval, export. | Hydra / OmegaConf configs + template registry |
+| Components | Reusable recipe of the whole process: data, model, train, tune, eval, export. | Hydra / OmegaConf configs + component registry |
 
-Templates are the glue. Workspace edit them. Scheduler run them. Monitor watch them.
+Components are the glue. Workspace edit them. Scheduler run them. Monitor watch them.
 
 ### Positioning: it is just a git repo
 
 **One line: a git repo for ML, with a GUI and better configs.** Like `create-next-app`, but for training runs. One command make a ready project.
 
-- **Repo is the product.** Project = git repo. Code, templates, configs, run specs are plain files in it.
+- **Repo is the product.** Project = git repo. Code, components, configs, run specs are plain files in it.
 - **GUI is a view.** It read and write those files. Close the GUI, repo still works.
 - **Zero lock-in.** `sentinel export script` generate **pure bare PyTorch code** (strip both Sentinel and Lightning). Anyone can run `python train.py` anywhere.
-- **Git hold:** code, templates, configs, machine list (no secrets), run specs, `.dvc` pointers.
+- **Git hold:** code, components, configs, machine list (no secrets), run specs, `.dvc` pointers.
 - **Git not hold:** metrics, logs, checkpoints, big data. These live in `mlruns/` (MLflow format), DVC cache, or object store.
 - **Strict MLflow storage:** Metrics and runs write directly to `mlruns/` directory or talk to MLflow tracking server API. Existing tools read it with zero friction.
 - **Better configs:** Hydra / OmegaConf YAML hierarchy. Composable, typed, validated before launch.
@@ -86,14 +86,14 @@ Templates are the glue. Workspace edit them. Scheduler run them. Monitor watch t
 
 ### Framework model (like Next.js)
 
-**Decision: it is a framework, not a template dump.** Next.js works like this: you write small files in agreed folders, the framework run, build and serve, and you upgrade by bumping a version.
+**Decision: it is a framework, not a component dump.** Next.js works like this: you write small files in agreed folders, the framework run, build and serve, and you upgrade by bumping a version.
 
 | Next.js | Sentinel |
 | --- | --- |
 | `create-next-app` | `create-sentinel-app` (or `uvx sentinel new`) |
-| `app/` folders (file-based routing) | `tasks/`, `models/`, `datasets/`, `templates/`, `configs/` |
+| `app/` folders (file-based routing) | `tasks/`, `models/`, `datasets/`, `components/`, `configs/` |
 | `next.config.js` | `sentinel.yaml` (human settings) |
-| `package-lock.json` | `sentinel.lock` (tool version, template hashes, answers) |
+| `package-lock.json` | `sentinel.lock` (tool version, component hashes, answers) |
 | `next dev` | `sentinel dev`: open web GUI, live reload of configs |
 | `next build` and `next start` | `sentinel run`, `sentinel sweep`, `sentinel export` |
 | Defaults for everything | Defaults for optimizer, AMP, checkpoints, logging |
@@ -103,7 +103,7 @@ Templates are the glue. Workspace edit them. Scheduler run them. Monitor watch t
 **Framework rules:**
 
 - User write only what is specific: model, dataset, metric, configs. Framework own the training loop, AMP, DDP, checkpoint, resume, logging.
-- A file in a convention folder is registered by its file name. Name is the id in templates and GUI.
+- A file in a convention folder is registered by its file name. Name is the id in components and GUI.
 - **Override by file.** Put a file with the same name in your repo (like `train_step.py`) and Sentinel use yours instead of built-in one.
 - Command mode (Part D) stay for scripts that do not fit the framework.
 - **No lock-in.** `sentinel export script` spit out pure bare PyTorch.
@@ -219,16 +219,16 @@ sentinel export script           # export pure bare PyTorch loop
 ```text
 my-project/
   sentinel.yaml     human project settings (like Cargo.toml)
-  sentinel.lock     machine hashes, versions, template answers (like Cargo.lock)
+  sentinel.lock     machine hashes, versions, component answers (like Cargo.lock)
   tasks/            task definitions & metric rules
   models/           model architectures (one file per model)
   datasets/         data loaders & DVC pointers
-  templates/        recipes inheriting built-ins
+  components/        recipes inheriting built-ins
   configs/          Hydra / OmegaConf YAML hierarchy
   hooks/            callbacks (on_step, on_epoch, on_eval)
   machines.yaml     local and remote SSH machines (no secrets)
   mlruns/           strict MLflow tracking directory
-  tests/            smoke tests for templates
+  tests/            smoke tests for components
   pyproject.toml    pinned dependencies (sentinel, torch, etc.)
   .sentinel/        local daemon cache & buffers (gitignored)
 ```
@@ -241,7 +241,7 @@ Upgrades must never destroy user work.
 
 - **Separate files:** `sentinel.yaml` is for humans. `sentinel.lock` is for the machine.
 - **3-way git merge:** `sentinel upgrade` creates an isolated branch `sentinel-upgrade-<version>`.
-- Merges old template, new template, and user edits using git 3-way merge.
+- Merges old component, new component, and user edits using git 3-way merge.
 - If conflicts happen, standard git conflict markers appear. Main branch is never touched directly.
 - User reviews diff in GUI or git, runs smoke tests, then merges or aborts.
 
@@ -256,9 +256,9 @@ Config system uses **Hydra / OmegaConf YAML hierarchy** (standard PyTorch resear
 - **Fast validation:** Validate configs before launching job. Fail in 1 second, not after 2 hours in queue.
 - **Freeze per run:** Full resolved Hydra YAML saved with the run in `mlruns/`.
 
-## 6. Templates: All Domains Upfront
+## 6. Components: All Domains Upfront
 
-Templates hold the recipe for the whole process.
+Components hold the recipe for the whole process.
 
 **Domain placeholders in schema from Day 1:**
 
@@ -266,7 +266,7 @@ Templates hold the recipe for the whole process.
 - `tabular`: classification, regression
 - `text`: classification, embedding
 - `llm-finetune`: LoRA / PEFT, SFT
-- `blank`: custom script template
+- `blank`: custom script component
 
 Recipes implemented incrementally. All placeholder types valid in schema immediately.
 
@@ -343,7 +343,7 @@ Measure repeat work baseline before and after:
   - CLI `create-sentinel-app` / `sentinel`.
   - Rust daemon supervisor + Axum API.
   - Leptos / Dioxus WASM web UI (ultra-low RAM, read-only idle drop).
-  - Hydra config system + domain template placeholders.
+  - Hydra config system + domain component placeholders.
   - Command mode + SDK mode.
   - Local + Remote SSH execution via outbound Agent.
   - Strict MLflow `mlruns/` storage.
@@ -357,7 +357,7 @@ Measure repeat work baseline before and after:
 - **Phase 3 (GUI Launch & Workspaces):**
   - GUI form generation from Hydra schemas.
   - 3-way merge `sentinel upgrade` flow.
-  - Save run as template.
+  - Save run as component.
 - **Phase 4 (Advanced Tuning):**
   - Parallel-coordinates, auto batch-size finder, learning rate finder.
 - **Phase 5 (Cloud & Clusters):**
