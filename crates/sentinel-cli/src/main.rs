@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use sentinel_core::scaffold::ProjectScaffolder;
 use sentinel_core::templates::{Template, TemplateRegistry};
 use std::path::Path;
 
@@ -149,7 +150,18 @@ async fn main() -> anyhow::Result<()> {
             println!("Exporting to {format}...");
         }
         Some(Commands::New { name }) => {
-            println!("Scaffolding new Sentinel project: {name}");
+            let target_path = Path::new(&name);
+            if target_path.exists() {
+                eprintln!("Error: Directory '{}' already exists.", name);
+                std::process::exit(1);
+            }
+            println!("Scaffolding new Sentinel project in: {}", target_path.display());
+            ProjectScaffolder::scaffold(target_path, &name)?;
+            println!("✨ Successfully created project '{name}'!");
+            println!("\nNext steps:");
+            println!("  cd {name}");
+            println!("  sentinel template list");
+            println!("  sentinel dev");
         }
         None => {
             println!("Sentinel v0.1.0 — run 'sentinel --help' for commands");
