@@ -91,7 +91,29 @@ pub fn generate_training_script(g: &ValidatedGraph, graph_id: &str) -> Result<St
         "mse" => "nn.MSELoss()",
         _ => "nn.BCEWithLogitsLoss()",
     };
-    let target_dtype = if classification { "torch.long" } else { "torch.float32" };
+    let label_code = if classification {
+        format!(
+            r#"def _class_key(v):
+    try:
+        return (0, float(v), v)
+    except ValueError:
+        return (1, 0.0, v)
+
+
+CLASSES = sorted({{r[{t:?}] for r in rows}}, key=_class_key)
+_index = {{c: i for i, c in enumerate(CLASSES)}}
+Y = torch.tensor([_index[r[{t:?}]] for r in rows], dtype=torch.long)
+print("classes:", CLASSES, flush=True)"#,
+            t = t.data.target
+        )
+    } else {
+        format!("Y = torch.tensor([float(r[{:?}]) for r in rows], dtype=torch.float32)", t.data.target)
+    };
+    let class_check = if classification {
+        "\nwith torch.no_grad():\n    _n_out = model(xtr[:1]).shape[-1]\nif _n_out != len(CLASSES):\n    raise SystemExit(f\"the model outputs {_n_out} values but the data has {len(CLASSES)} classes {CLASSES}; set the last linear block's `out` to {len(CLASSES)}\")\n"
+    } else {
+        ""
+    };
     let loss_call = if classification { "loss_fn(out, yb)" } else { "loss_fn(out, yb.view_as(out))" };
     let metric = if classification {
         "(model(xte).argmax(1) == yte).float().mean().item()"
@@ -132,17 +154,24 @@ import torch.nn as nn
 {model_code}
 
 torch.manual_seed({seed})
-with open({csv:?}) as f:
-    rows = list(csv.DictReader(f))
+with open({csv:?}, newline="") as f:
+    rows = list(csv.DictReader(f, skipinitialspace=True))
+_used = [{feats}, {target:?}]
+_total = len(rows)
+rows = [r for r in rows if all((r.get(c) or "").strip() != "" for c in _used)]
+if len(rows) < _total:
+    print(f"skipped {{_total - len(rows)}} rows with missing values", flush=True)
+if not rows:
+    raise SystemExit("no usable rows in " + {csv:?})
 X = torch.tensor([[float(r[c]) for c in [{feats}]] for r in rows], dtype=torch.float32){reshape}
-Y = torch.tensor([float(r[{target:?}]) for r in rows], dtype={target_dtype})
+{label_code}
 
 perm = torch.randperm(len(X))
 n_test = int(len(X) * {split})
 te, tr = perm[:n_test], perm[n_test:]
 xtr, ytr, xte, yte = X[tr], Y[tr], X[te], Y[te]
 
-model = Model()
+model = Model(){class_check}
 loss_fn = {loss_ctor}
 optimizer = torch.optim.{opt}(model.parameters(), lr={lr})
 

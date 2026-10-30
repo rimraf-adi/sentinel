@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { BlockInfo, Training } from '../api';
+import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
 import { Field } from '../ui';
 import { IDENT } from './convert';
 import type { BNode } from './types';
@@ -26,10 +27,16 @@ export interface InspectorProps {
   patchData: (id: string, patch: Record<string, unknown>) => void;
   rename: (id: string, to: string) => boolean;
   remove: () => void;
+  applyDataset: (d: { csv: string; features: string[]; target: string; loss: string; outputs: number }) => void;
 }
 
 export function Inspector(p: InspectorProps) {
   const { node, blocks } = p;
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const choose = (pk: Picked, features: string[], target: string) => {
+    const t = taskOf(pk.schema, target);
+    p.applyDataset({ csv: pk.path, features, target, loss: t.loss, outputs: t.outputs });
+  };
   const del = <button className="btn sm danger" onClick={p.remove}>Delete</button>;
 
   if (node?.type === 'input') {
@@ -87,6 +94,9 @@ export function Inspector(p: InspectorProps) {
         </>
       ) : (
         <>
+          <DatasetPicker onPick={(pk) => { setPicked(pk); const sg = pk.schema.suggestion; choose(pk, sg?.features ?? [], sg?.target ?? pk.schema.columns[pk.schema.columns.length - 1]?.name ?? ''); }} />
+          {picked && <SchemaEditor schema={picked.schema} features={t.data.features} target={t.data.target} onChange={(f, tg) => choose(picked, f, tg)} />}
+          <p className="hint gap-t">Choosing a dataset also sets the input width and the final linear block's size.</p>
           <Field label="Loss">{sel(['cross_entropy', 'mse', 'bce_logits'], t.loss, (v) => set({ loss: v }))}</Field>
           <Field label="Optimizer">{sel(['adam', 'adamw', 'sgd'], t.optimizer, (v) => set({ optimizer: v }))}</Field>
           <Field label="Learning rate"><Commit value={String(t.lr)} onCommit={(v) => set({ lr: parseFloat(v) })} /></Field>

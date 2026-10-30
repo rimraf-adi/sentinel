@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type Component } from '../api';
 import { usePoll } from '../hooks';
+import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
 import { Field, Modal, useToast } from '../ui';
 
 function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => void; refresh: () => void; go: (t: string) => void }) {
@@ -8,6 +9,25 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
   const [vals, setVals] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(c.parameters).map(([k, p]) => [k, String(p.default ?? '')])),
   );
+  const [picked, setPicked] = useState<Picked | null>(null);
+  const [cols, setCols] = useState<{ features: string[]; target: string }>({ features: [], target: '' });
+
+  /** Fill every dataset-related hyperparameter this component declares. */
+  const fill = (pk: Picked, features: string[], target: string) => {
+    const t = taskOf(pk.schema, target);
+    const want: Record<string, string> = {
+      csv: pk.path, feature_cols: features.join(','), target, features: String(features.length),
+      classes: String(t.outputs), loss: t.loss, seq_len: String(features.length), step_features: '1',
+    };
+    setVals((v) => ({ ...v, ...Object.fromEntries(Object.entries(want).filter(([k]) => k in c.parameters)) }));
+    setCols({ features, target });
+  };
+  const onPick = (pk: Picked) => {
+    setPicked(pk);
+    const sg = pk.schema.suggestion;
+    const last = pk.schema.columns[pk.schema.columns.length - 1]?.name ?? '';
+    fill(pk, sg?.features ?? [], sg?.target ?? last);
+  };
   const coerce = () => {
     const o: Record<string, unknown> = {};
     for (const [k, p] of Object.entries(c.parameters)) {
@@ -26,6 +46,12 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
   return (
     <Modal title={c.name} sub={c.component_id} onClose={onClose}>
       <p className="hint">{c.description}</p>
+      {'csv' in c.parameters && (
+        <div className="card" style={{ marginBottom: 12, background: 'var(--bg)' }}>
+          <DatasetPicker onPick={onPick} />
+          {picked && <SchemaEditor schema={picked.schema} features={cols.features} target={cols.target} onChange={(f, t) => fill(picked, f, t)} />}
+        </div>
+      )}
       {Object.entries(c.parameters).map(([k, p]) => (
         <Field key={k} label={k} hint={[p.help, p.range ? `range ${p.range[0]}–${p.range[1]}` : ''].filter(Boolean).join(' · ')}>
           {p.type === 'choice' ? (

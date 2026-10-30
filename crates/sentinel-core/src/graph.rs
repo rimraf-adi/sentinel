@@ -75,6 +75,8 @@ pub struct NodeSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DataSpec {
     pub csv: String,
+    /// A YAML list, or one comma-separated string (so it can be a single `${param}`).
+    #[serde(deserialize_with = "list_or_csv")]
     pub features: Vec<String>,
     pub target: String,
     /// Per-sample shape the feature vector is reshaped to (e.g. [2, 1] for a sequence).
@@ -84,6 +86,19 @@ pub struct DataSpec {
     pub test_split: f64,
     #[serde(default)]
     pub seed: u64,
+}
+
+fn list_or_csv<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Either {
+        List(Vec<String>),
+        Csv(String),
+    }
+    Ok(match Either::deserialize(d)? {
+        Either::List(v) => v,
+        Either::Csv(s) => s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect(),
+    })
 }
 
 fn default_split() -> f64 {

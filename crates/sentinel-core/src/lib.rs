@@ -4,6 +4,7 @@ pub mod authoring;
 pub mod blocks;
 pub mod codegen;
 pub mod config;
+pub mod dataset_schema;
 pub mod graph;
 pub mod export;
 pub mod models;

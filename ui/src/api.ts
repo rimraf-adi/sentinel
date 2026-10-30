@@ -84,6 +84,9 @@ export interface TrackedRun {
   params: Record<string, string>;
   latest: Record<string, number>;
 }
+export interface CsvColumn { name: string; kind: 'numeric' | 'integer' | 'categorical'; distinct: number; distinct_capped: boolean; missing: number; examples: string[] }
+export interface Suggestion { target: string; features: string[]; task: 'classification' | 'regression'; loss: string; outputs: number }
+export interface CsvSchema { rows: number; columns: CsvColumn[]; suggestion: Suggestion | null }
 export interface BlockParam {
   name: string;
   required: boolean;
@@ -178,6 +181,8 @@ export const api = {
   trackedRun: (id: string) => req<{ run: TrackedRun; metrics: Record<string, MetricPoint[]> }>(`/api/tracking/runs/${id}`),
   saveComponent: (b: { name: string; domain: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
     post<{ ok: true; component_id: string; path: string }>('/api/components/save', b),
+  schemaOfDataset: (name: string) => req<CsvSchema>(`/api/datasets/${encodeURIComponent(name)}/schema`),
+  schemaOfPath: (path: string) => req<CsvSchema>(`/api/schema?path=${encodeURIComponent(path)}`),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
   validate: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) =>
     post<ValidateOk | ApiErr>('/api/graph/validate', b).catch((e: Error) => ({ ok: false, error: e.message }) as ApiErr),

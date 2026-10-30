@@ -53,6 +53,8 @@ impl Server {
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
             .route("/api/components/save", post(save_component))
+            .route("/api/schema", get(schema_for_path))
+            .route("/api/datasets/:name/schema", get(schema_for_dataset))
             .route("/api/tracking/runs", get(tracking_runs))
             .route("/api/tracking/runs/:id", get(tracking_run))
             .route("/api/blocks", get(list_blocks))
@@ -665,4 +667,45 @@ async fn save_component(Json(req): Json<SaveComponentRequest>) -> Result<Json<se
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     std::fs::write(&path, yaml).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(json!({ "ok": true, "component_id": id, "path": rel.display().to_string() })))
+}
+
+// ---------------------------------------------------------------------------
+// Dataset schema inspection (columns, task and loss suggestions)
+// ---------------------------------------------------------------------------
+
+fn project_root() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    cwd.canonicalize().unwrap_or(cwd)
+}
+
+fn inspect(path: &Path) -> Result<Json<serde_json::Value>, ApiError> {
+    let schema = sentinel_core::dataset_schema::inspect_csv(path).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(serde_json::to_value(schema).unwrap_or_default()))
+}
+
+/// Registered datasets may live anywhere (the user mounted them); ad-hoc paths must stay in the project.
+async fn schema_for_dataset(AxumPath(name): AxumPath<String>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = project_root();
+    let ds = sentinel_core::storage::DatasetRegistry::load_all(&root)
+        .into_iter()
+        .find(|d| d.name == name)
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, format!("dataset '{name}' is not mounted")))?;
+    let p = PathBuf::from(&ds.path);
+    inspect(&if p.is_absolute() { p } else { root.join(p) })
+}
+
+#[derive(Deserialize)]
+struct SchemaQuery {
+    path: String,
+}
+
+async fn schema_for_path(Query(q): Query<SchemaQuery>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = project_root();
+    let p = PathBuf::from(&q.path);
+    let full = if p.is_absolute() { p } else { root.join(p) };
+    let full = full.canonicalize().map_err(|_| api_err(StatusCode::NOT_FOUND, format!("{} not found", q.path)))?;
+    if !full.starts_with(&root) {
+        return Err(api_err(StatusCode::FORBIDDEN, "path is outside the project; mount it as a dataset first"));
+    }
+    inspect(&full)
 }

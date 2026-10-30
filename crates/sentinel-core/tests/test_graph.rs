@@ -239,3 +239,60 @@ fn training_script_logs_model_hyperparameters() {
     // fc1.out must be recorded with the run so runs can be compared by their hyperparameters
     assert!(script.contains(r#"\"fc1\":{"#) && script.contains(r#"\"out\":7"#), "{script}");
 }
+
+#[test]
+fn features_accept_list_or_comma_string_and_component_columns_are_parameters() {
+    let r = registry();
+    let c = r.get("tabular/ann-classifier@v1").unwrap();
+    let mut ov = HashMap::new();
+    ov.insert("feature_cols".to_string(), serde_yaml::Value::from("a, b ,c"));
+    ov.insert("target".to_string(), serde_yaml::Value::from("species"));
+    ov.insert("features".to_string(), serde_yaml::Value::from(3));
+    let t = c.build_graph(&ov).unwrap().spec.training.unwrap();
+    assert_eq!(t.data.features, ["a", "b", "c"]);
+    assert_eq!(t.data.target, "species");
+}
+
+/// Real PyTorch run: string class labels + a row with a missing value, on a 3-class CSV.
+#[test]
+fn training_script_handles_string_labels_and_missing_values_in_pytorch() {
+    if !have_torch() {
+        eprintln!("skipping: torch unavailable");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("sentinel-strlabels-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut csv = String::from("sepal,petal,species\n");
+    for i in 0..40 {
+        let f = i as f64 / 40.0;
+        csv.push_str(&format!("{:.3},{:.3},low\n{:.3},{:.3},mid\n{:.3},{:.3},high\n", f, f * 0.2, 3.0 + f, 1.0 + f * 0.2, 6.0 + f, 4.0 + f * 0.2));
+    }
+    csv.push_str("1.0,,low\n"); // missing petal: must be skipped, not crash
+    std::fs::write(dir.join("d.csv"), csv).unwrap();
+
+    let r = registry();
+    let c = r.get("tabular/ann-classifier@v1").unwrap();
+    let mut ov = HashMap::new();
+    ov.insert("csv".to_string(), serde_yaml::Value::from("d.csv"));
+    ov.insert("feature_cols".to_string(), serde_yaml::Value::from("sepal,petal"));
+    ov.insert("target".to_string(), serde_yaml::Value::from("species"));
+    ov.insert("classes".to_string(), serde_yaml::Value::from(3));
+    ov.insert("epochs".to_string(), serde_yaml::Value::from(150));
+    let script = generate_training_script(&c.build_graph(&ov).unwrap(), "t").unwrap();
+    std::fs::write(dir.join("train.py"), &script).unwrap();
+    let out = std::process::Command::new("python3").args(["-I", "train.py"]).current_dir(&dir).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}\n{}", String::from_utf8_lossy(&out.stderr), script);
+    assert!(stdout.contains("skipped 1 rows with missing values"), "{stdout}");
+    assert!(stdout.contains("classes: ['high', 'low', 'mid']"), "{stdout}");
+    let acc: f64 = stdout.lines().filter(|l| l.contains("test_acc")).last().unwrap().rsplit(' ').next().unwrap().parse().unwrap();
+    assert!(acc > 0.9, "accuracy {acc}\n{stdout}");
+
+    // wrong output size must give a clear message, not a cryptic tensor error
+    ov.insert("classes".to_string(), serde_yaml::Value::from(2));
+    let bad = generate_training_script(&c.build_graph(&ov).unwrap(), "t").unwrap();
+    std::fs::write(dir.join("bad.py"), bad).unwrap();
+    let out = std::process::Command::new("python3").args(["-I", "bad.py"]).current_dir(&dir).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("data has 3 classes"), "{}", String::from_utf8_lossy(&out.stderr));
+}

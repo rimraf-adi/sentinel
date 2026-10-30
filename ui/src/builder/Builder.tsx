@@ -190,6 +190,24 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
     apply((q) => ({ ...q, nodes: q.nodes.map((n) => (n.id === id ? ({ ...n, data: { ...n.data, ...patch } } as BNode) : n)) }), true);
   }, [apply, toast]);
 
+  /** Apply a dataset choice: training data, loss, input width, and the output layer's size. */
+  const applyDataset = useCallback((d: { csv: string; features: string[]; target: string; loss: string; outputs: number }) => {
+    apply((p) => {
+      const base = p.training ?? { loss: d.loss, optimizer: 'adam', lr: 0.01, epochs: 200, data: { csv: d.csv, features: d.features, target: d.target } };
+      const training = { ...base, loss: d.loss, data: { ...base.data, csv: d.csv, features: d.features, target: d.target } };
+      const inputs = p.nodes.filter((n) => n.type === 'input');
+      const outEdge = p.edges.find((e) => e.target.startsWith('out:'));
+      const nodes = p.nodes.map((n) => {
+        if (inputs.length === 1 && n.id === inputs[0].id && n.type === 'input' && n.data.shape.length === 2)
+          return { ...n, data: { ...n.data, shape: [n.data.shape[0], d.features.length] } } as BNode;
+        if (outEdge && n.id === outEdge.source && n.type === 'block' && n.data.block === 'linear')
+          return { ...n, data: { ...n.data, params: { ...n.data.params, out: d.outputs } } } as BNode;
+        return n;
+      });
+      return { ...p, training, nodes };
+    }, true);
+  }, [apply]);
+
   const removeSelected = useCallback(() => {
     apply((p) => {
       const gone = new Set(p.nodes.filter((n) => n.selected).map((n) => n.id));
@@ -277,7 +295,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
         </div>
         <div className="bd-side">
           <Inspector node={selected} blocks={blocks} siblings={g.nodes} training={g.training}
-            setTraining={(t) => apply((p) => ({ ...p, training: t }), true)} patchData={patchData} rename={rename} remove={removeSelected} />
+            setTraining={(t) => apply((p) => ({ ...p, training: t }), true)} patchData={patchData} rename={rename} remove={removeSelected} applyDataset={applyDataset} />
         </div>
       </div>
       {saving && result && (

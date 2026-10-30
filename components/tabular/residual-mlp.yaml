@@ -5,11 +5,14 @@ description: "MLP with a skip connection (add block) - the smallest real DAG"
 domain: "tabular"
 parameters:
   features: {type: int, default: 2, range: [1, 4096], help: "Input feature count"}
-  classes: {type: int, default: 3, range: [2, 1000], help: "Number of classes"}
+  classes: {type: int, default: 3, range: [1, 1000], help: "Output size: number of classes, or 1 for regression"}
   hidden: {type: int, default: 32, range: [2, 1024], help: "Hidden width"}
   lr: {type: float, default: 0.01, range: [0.00001, 0.5], help: "Learning rate"}
   epochs: {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
-  csv: {type: string, default: "data/demo.csv", help: "Training CSV (columns x1, x2, label)"}
+  csv: {type: string, default: "data/demo.csv", help: "Training CSV"}
+  feature_cols: {type: string, default: "x1,x2", help: "Comma-separated feature columns (numeric)"}
+  loss: {type: choice, default: "cross_entropy", options: ["cross_entropy", "mse", "bce_logits"], help: "cross_entropy for classes, mse for regression"}
+  target: {type: string, default: "label", help: "Target column (class labels or a number to regress)"}
 graph:
   inputs: {x: [B, "${features}"]}
   nodes:
@@ -27,8 +30,8 @@ graph:
     - skip -> head
   outputs: {logits: head}
   training:
-    loss: cross_entropy
+    loss: "${loss}"
     optimizer: adam
     lr: "${lr}"
     epochs: "${epochs}"
-    data: {csv: "${csv}", features: [x1, x2], target: label}
+    data: {csv: "${csv}", features: "${feature_cols}", target: "${target}"}
