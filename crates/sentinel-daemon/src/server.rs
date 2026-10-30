@@ -154,6 +154,7 @@ impl Server {
             .route("/api/predict", post(predict_run))
             .route("/api/generate", post(generate_run))
             .route("/api/blocks", get(list_blocks))
+            .route("/api/training/catalog", get(training_catalog))
             .route("/api/graph/validate", post(graph_validate))
             .route("/api/graph/compose", post(graph_compose))
             .route("/api/graph/run", post(graph_run))
@@ -671,6 +672,10 @@ fn resolve_graph(
     } else {
         Err(api_err(StatusCode::BAD_REQUEST, "provide either component_id or graph"))
     }
+}
+
+async fn training_catalog() -> impl IntoResponse {
+    Json(sentinel_core::training::catalog())
 }
 
 async fn list_blocks() -> impl IntoResponse {

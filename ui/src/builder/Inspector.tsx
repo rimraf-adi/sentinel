@@ -3,6 +3,7 @@ import type { BlockInfo, NodeDesc, Training, ValidateOk } from '../api';
 import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
 import { Field, fmtBytes, fmtCount } from '../ui';
 import { IDENT } from './convert';
+import { TrainingForm } from './TrainingForm';
 import type { BNode } from './types';
 
 /** Text input that commits on blur/Enter so partial edits (e.g. JSON) don't thrash validation. */
@@ -135,16 +136,9 @@ export function Inspector(p: InspectorProps) {
       ) : (
         <>
           <DatasetPicker onPick={(pk) => { setPicked(pk); const sg = pk.schema.suggestion; choose(pk, sg?.features ?? [], sg?.target ?? pk.schema.columns[pk.schema.columns.length - 1]?.name ?? ''); }} />
-          {picked && <SchemaEditor schema={picked.schema} features={t.data.features} target={t.data.target} onChange={(f, tg) => choose(picked, f, tg)} />}
+          {picked && <SchemaEditor schema={picked.schema} features={t.data.features} target={t.data.target ?? ''} onChange={(f, tg) => choose(picked, f, tg)} />}
           <p className="hint gap-t">Choosing a dataset also sets the input width and the final linear block's size.</p>
-          <Field label="Loss">{sel(['cross_entropy', 'mse', 'bce_logits'], t.loss, (v) => set({ loss: v }))}</Field>
-          <Field label="Optimizer">{sel(['adam', 'adamw', 'sgd'], t.optimizer, (v) => set({ optimizer: v }))}</Field>
-          <Field label="Learning rate"><Commit value={String(t.lr)} onCommit={(v) => set({ lr: parseFloat(v) })} /></Field>
-          <Field label="Epochs"><Commit value={String(t.epochs)} onCommit={(v) => set({ epochs: parseInt(v, 10) })} /></Field>
-          <Field label="Batch size" hint="empty = full batch"><Commit value={show(t.batch_size)} onCommit={(v) => set({ batch_size: v.trim() ? parseInt(v, 10) : null })} /></Field>
-          <Field label="CSV path"><Commit mono value={t.data.csv} onCommit={(v) => set({ data: { ...t.data, csv: v } })} /></Field>
-          <Field label="Feature columns" hint="comma separated"><Commit value={t.data.features.join(', ')} onCommit={(v) => set({ data: { ...t.data, features: v.split(',').map((s) => s.trim()).filter(Boolean) } })} /></Field>
-          <Field label="Target column"><Commit value={t.data.target} onCommit={(v) => set({ data: { ...t.data, target: v } })} /></Field>
+          <TrainingForm t={t} set={set} nodeIds={p.siblings.filter((n) => n.type === 'block').map((n) => n.id)} />
           <button className="btn sm danger" onClick={() => p.setTraining(null)}>Remove training</button>
         </>
       )}

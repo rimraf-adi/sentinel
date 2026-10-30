@@ -60,6 +60,9 @@ with open("data/demo.csv", "w") as f:
             t = k * 4 + 4 * r + random.gauss(0, 0.2)
             f.write(f"{r * math.sin(t):.4f},{r * math.cos(t):.4f},{k}\n")
 PY
+"$SENTINEL_BIN" component training | grep -q "listnet" || { echo "❌ training catalog missing ranking losses"; exit 1; }
+"$SENTINEL_BIN" component training --task ranking | grep -q "ndcg" || { echo "❌ task filter broken"; exit 1; }
+if "$SENTINEL_BIN" component training --task nope >/dev/null 2>&1; then echo "❌ unknown task accepted"; exit 1; fi
 "$SENTINEL_BIN" component blocks | grep -q "lstm" || { echo "❌ block catalog missing lstm"; exit 1; }
 "$SENTINEL_BIN" component show tabular/ann-classifier@v1 | grep -q "head.out" || { echo "❌ show printed no shapes"; exit 1; }
 "$SENTINEL_BIN" component compose sequence/lstm-classifier@v1 -o lstm.py --set hidden=16
@@ -113,6 +116,7 @@ trap 'kill $DAEMON 2>/dev/null || true' EXIT
 for i in $(seq 1 40); do curl -sf "localhost:$PORT/api/health" >/dev/null && break; sleep 0.25; done
 curl -sf "localhost:$PORT/api/health" >/dev/null || { echo "❌ daemon did not start"; cat "$TEST_PROJ/daemon.log"; exit 1; }
 curl -sf "localhost:$PORT/" | grep -q 'id="root"' || { echo "❌ embedded React UI not served"; exit 1; }
+curl -s "localhost:$PORT/api/training/catalog" | grep -q '"quantile"' || { echo "❌ /api/training/catalog missing"; exit 1; }
 test "$(curl -s "localhost:$PORT/api/blocks" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')" -ge 20 || { echo "❌ /api/blocks too small"; exit 1; }
 curl -s -X POST "localhost:$PORT/api/graph/validate" -H 'content-type: application/json' \
   -d '{"component_id":"tabular/ann-classifier@v1"}' | grep -q '"ok":true' || { echo "❌ validate failed"; exit 1; }

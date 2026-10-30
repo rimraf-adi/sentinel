@@ -123,6 +123,12 @@ enum ComponentCommands {
     SaveRun { run_id: String, name: String },
     /// List the neural-network building blocks available to component graphs
     Blocks,
+    /// List the tasks, losses, optimizers, schedulers and training strategies a component's `training:` section accepts
+    Training {
+        /// Show only this task (classification, binary, multilabel, regression, ranking, reconstruction, vae, custom)
+        #[arg(long)]
+        task: Option<String>,
+    },
     /// Show a graph component: execution order and the tensor shape on every port
     Show {
         component: String,
@@ -301,6 +307,7 @@ async fn main() -> anyhow::Result<()> {
             ComponentCommands::SaveRun { run_id, name } => {
                 println!("Saving run {run_id} as component '{name}'...");
             }
+            ComponentCommands::Training { task } => print_training_catalog(task.as_deref()),
             ComponentCommands::Blocks => {
                 for e in sentinel_core::compound::BlockLibrary::reload_project(Path::new("blocks")) {
                     eprintln!("warning: ignoring compound block: {e}");
@@ -557,4 +564,48 @@ async fn run_dev(port: u16, host: &str) -> anyhow::Result<()> {
     }
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+fn print_params(params: &[serde_json::Value]) -> String {
+    params.iter().map(|p| format!("{}={}", p["name"].as_str().unwrap_or("?"), p["default"])).collect::<Vec<_>>().join(", ")
+}
+
+/// Print the training catalog (the same data the UI form is built from).
+fn print_training_catalog(only: Option<&str>) {
+    let c = sentinel_core::training::catalog();
+    let tasks = c["tasks"].as_array().cloned().unwrap_or_default();
+    if let Some(t) = only {
+        if !tasks.iter().any(|x| x["name"] == t) {
+            let names: Vec<&str> = tasks.iter().filter_map(|x| x["name"].as_str()).collect();
+            eprintln!("unknown task '{t}' (known: {})", names.join(", "));
+            std::process::exit(1);
+        }
+    }
+    println!("TASKS AND LOSSES  (the task is inferred from `loss`; set `task:` to override)");
+    for t in tasks.iter().filter(|t| only.map_or(true, |o| t["name"] == o)) {
+        let metrics: Vec<&str> = t["metrics"].as_array().map(|a| a.iter().filter_map(|m| m.as_str()).collect()).unwrap_or_default();
+        println!("\n  {}  -  {}", t["name"].as_str().unwrap_or(""), t["help"].as_str().unwrap_or(""));
+        println!("      metrics: {}", metrics.join(", "));
+        for l in t["losses"].as_array().into_iter().flatten() {
+            println!("      loss {:<14} {}", l["name"].as_str().unwrap_or(""), l["help"].as_str().unwrap_or(""));
+            let ps = print_params(l["params"].as_array().map(|v| v.as_slice()).unwrap_or(&[]));
+            if !ps.is_empty() {
+                println!("           settings: {ps}");
+            }
+        }
+    }
+    if only.is_some() {
+        return;
+    }
+    for (title, key) in [("OPTIMIZERS", "optimizers"), ("LR SCHEDULERS  (add warmup_epochs to any)", "schedulers")] {
+        println!("\n{title}");
+        for o in c[key].as_array().into_iter().flatten() {
+            let ps = print_params(o["params"].as_array().map(|v| v.as_slice()).unwrap_or(&[]));
+            println!("  {:<16} {}{}", o["name"].as_str().unwrap_or(""), o["help"].as_str().unwrap_or(""), if ps.is_empty() { String::new() } else { format!("  [{ps}]") });
+        }
+    }
+    println!("\nSTRATEGIES");
+    for s in c["strategies"].as_array().into_iter().flatten() {
+        println!("  {:<15} {}", s["name"].as_str().unwrap_or(""), s["help"].as_str().unwrap_or(""));
+    }
 }

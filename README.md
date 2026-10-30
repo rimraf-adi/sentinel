@@ -143,6 +143,34 @@ transformer layers), and MACs equal PyTorch's FLOP counter (as 2 x MACs) on MLP,
 the same numbers appear in a live bar, as a badge on each node, and in the inspector; component cards show the size of the
 default configuration; and each training run records `n_params`.
 
+## Tasks, losses and training strategies
+
+A component's `training:` section picks a task, a loss, an optimizer and optional strategies. Run
+`sentinel component training` (or `--task ranking`) for the full catalog; the Builder form and
+`GET /api/training/catalog` use the same data. The task is inferred from the loss; set `task:` to override.
+
+```yaml
+training:
+  loss: {name: focal, gamma: 2.0, class_weights: balanced}
+  optimizer: {name: sgd, momentum: 0.9, nesterov: true}
+  lr: 0.05
+  epochs: 100
+  scheduler: {name: cosine, warmup_epochs: 5}
+  clip_grad: 1.0
+  accumulate: 4
+  amp: bf16
+  early_stopping: {patience: 10, monitor: test_loss}
+  save_best: true
+  data: {csv: data/d.csv, features: [a, b], target: label}
+```
+
+- **Tasks:** classification, binary, multilabel, regression, ranking (needs `data.group`), reconstruction, vae, custom.
+- **Losses:** cross-entropy (label smoothing, class weights), focal, multi-margin, BCE (pos weight), MSE, MAE, Huber, smooth-L1, quantile, Poisson, log-cosh, RankNet, margin-rank, ListNet, VAE.
+- **Custom:** `loss: custom` with a `custom:` section holding inline `source:` or a project-relative `file:`, plus `loss:` / `metric:` function names.
+- **Strategies:** weight decay, gradient clipping, accumulation, mixed precision, early stopping, best-epoch restore, layer freezing, `init_from` a saved `model.pt`, device selection.
+
+Mistakes are rejected before anything runs, with a specific message (for example, a loss that does not fit the task).
+
 ## Footprint
 
 Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with

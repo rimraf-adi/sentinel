@@ -162,13 +162,34 @@ export interface GraphSpec {
   outputs: Record<string, string>;
   training?: Training | null;
 }
+/** A choice with settings: a bare name, or `{name, ...settings}`. */
+export type Named = string | ({ name: string } & Record<string, unknown>);
 export interface Training {
-  loss: string;
-  optimizer: string;
+  loss: Named;
+  task?: string;
+  optimizer: Named;
   lr: number;
+  weight_decay?: number;
   epochs: number;
   batch_size?: number | null;
-  data: { csv: string; features: string[]; target: string; reshape?: number[] | null; test_split?: number; seed?: number };
+  scheduler?: Named;
+  clip_grad?: number;
+  accumulate?: number;
+  amp?: string;
+  device?: string;
+  early_stopping?: { patience: number; min_delta?: number; monitor?: string };
+  save_best?: boolean;
+  freeze?: string[];
+  init_from?: string;
+  custom?: { file?: string; source?: string; loss?: string; metric?: string; mode?: string };
+  data: { csv: string; features: string[]; target?: string; targets?: string[]; group?: string; reshape?: number[] | null; test_split?: number; seed?: number };
+}
+export interface CatParam { name: string; default: unknown; help: string; options: string[] }
+export interface CatChoice { name: string; help: string; params: CatParam[] }
+export interface CatTask { name: string; help: string; metrics: string[]; primary: string; needs: string; losses: CatChoice[] }
+export interface TrainingCatalog {
+  tasks: CatTask[]; optimizers: CatChoice[]; schedulers: CatChoice[]; amp: string[]; devices: string[];
+  strategies: { name: string; help: string }[];
 }
 export interface NodeStats { params: number; macs: number | null; shared: boolean; inner: GraphStats | null }
 export interface GraphStats {
@@ -259,6 +280,7 @@ export const api = {
   predict: (run_id: string, inputs: number[][]) => post<PredictResult>('/api/predict', { run_id, inputs }),
   generate: (run_id: string, count: number, seed: number) => post<GenerateResult>('/api/generate', { run_id, count, seed }),
   blocks: () => req<BlockInfo[]>('/api/blocks'),
+  trainingCatalog: () => req<TrainingCatalog>('/api/training/catalog'),
   saveBlock: (b: { name: string; family: string; description: string; graph: GraphSpec; expose: { node: string; param: string; name: string }[]; overwrite?: boolean }) =>
     post<{ ok: true; name: string; path: string }>('/api/blocks/save', b),
   validate: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) =>

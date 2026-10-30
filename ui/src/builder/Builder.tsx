@@ -202,7 +202,10 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
   const applyDataset = useCallback((d: { csv: string; features: string[]; target: string; loss: string; outputs: number }) => {
     apply((p) => {
       const base = p.training ?? { loss: d.loss, optimizer: 'adam', lr: 0.01, epochs: 200, data: { csv: d.csv, features: d.features, target: d.target } };
-      const training = { ...base, loss: d.loss, data: { ...base.data, csv: d.csv, features: d.features, target: d.target } };
+      // keep a loss the user chose when it still fits the dataset's task family
+      const family = d.loss === 'cross_entropy' ? ['cross_entropy', 'focal', 'multi_margin'] : ['mse', 'mae', 'huber', 'smooth_l1', 'quantile', 'poisson', 'log_cosh'];
+      const cur = typeof base.loss === 'string' ? base.loss : base.loss.name;
+      const training = { ...base, loss: family.includes(cur) ? base.loss : d.loss, task: undefined, data: { ...base.data, csv: d.csv, features: d.features, target: d.target, targets: undefined } };
       const inputs = p.nodes.filter((n) => n.type === 'input');
       const outEdge = p.edges.find((e) => e.target.startsWith('out:'));
       const nodes = p.nodes.map((n) => {
