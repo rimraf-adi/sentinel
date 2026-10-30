@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
+use sentinel_core::export::ScriptExporter;
 use sentinel_core::scaffold::ProjectScaffolder;
 use sentinel_core::templates::{Template, TemplateRegistry};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Parser, Debug)]
@@ -42,6 +44,10 @@ enum Commands {
     Export {
         #[arg(default_value = "script")]
         format: String,
+        #[arg(short, long, default_value = "vision/image-classification@v1")]
+        template: String,
+        #[arg(short, long, default_value = "train_standalone.py")]
+        output: String,
     },
     /// Initialize a new Sentinel project
     New {
@@ -146,8 +152,21 @@ async fn main() -> anyhow::Result<()> {
                 println!("Saving run {run_id} as template '{name}'...");
             }
         },
-        Some(Commands::Export { format }) => {
-            println!("Exporting to {format}...");
+        Some(Commands::Export { format, template, output }) => {
+            println!("Exporting template '{template}' as pure standalone {format} to: {output}");
+            let mut registry = TemplateRegistry::new();
+            let _ = registry.load_from_dir(Path::new("templates"));
+
+            let tmpl = registry.get(&template).ok_or_else(|| {
+                anyhow::anyhow!("Template '{}' not found in registry", template)
+            })?;
+
+            let resolved = tmpl.resolve_config(&HashMap::new())?;
+            let python_script = ScriptExporter::export_pytorch_script(tmpl, &resolved);
+
+            std::fs::write(&output, python_script)?;
+            println!("✨ Successfully exported standalone PyTorch script to: {output}");
+            println!("💡 Run anywhere without Sentinel: python {output}");
         }
         Some(Commands::New { name }) => {
             let target_path = Path::new(&name);
