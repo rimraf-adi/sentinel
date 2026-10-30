@@ -27,6 +27,16 @@ pub enum Block {
     Attention,
     TransformerEncoder,
     Gcn,
+    AvgPool2d,
+    GlobalAvgPool,
+    ConvTranspose2d,
+    Upsample,
+    PatchEmbed,
+    ClsToken,
+    ClsSelect,
+    PositionalEncoding,
+    Sampling,
+    Gat,
 }
 
 const ALL: &[Block] = &[
@@ -50,7 +60,73 @@ const ALL: &[Block] = &[
     Block::Attention,
     Block::TransformerEncoder,
     Block::Gcn,
+    Block::AvgPool2d,
+    Block::GlobalAvgPool,
+    Block::ConvTranspose2d,
+    Block::Upsample,
+    Block::PatchEmbed,
+    Block::ClsToken,
+    Block::ClsSelect,
+    Block::PositionalEncoding,
+    Block::Sampling,
+    Block::Gat,
 ];
+
+const HELPER_POSITIONAL: &str = r#"class PositionalEncoding(nn.Module):
+    def __init__(self, max_len, dim, kind="learned"):
+        super().__init__()
+        if kind == "learned":
+            self.pe = nn.Parameter(torch.zeros(1, max_len, dim))
+            nn.init.normal_(self.pe, std=0.02)
+        else:
+            pos = torch.arange(max_len).unsqueeze(1).float()
+            div = torch.exp(torch.arange(0, dim, 2).float() * (-torch.log(torch.tensor(10000.0)) / dim))
+            pe = torch.zeros(1, max_len, dim)
+            pe[0, :, 0::2] = torch.sin(pos * div)
+            pe[0, :, 1::2] = torch.cos(pos * div)[:, : dim // 2]
+            self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        return x + self.pe[:, : x.shape[1]]
+"#;
+
+const HELPER_CLS: &str = r#"class ClsToken(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.cls = nn.Parameter(torch.zeros(1, 1, dim))
+        nn.init.normal_(self.cls, std=0.02)
+
+    def forward(self, x):
+        return torch.cat([self.cls.expand(x.shape[0], -1, -1), x], dim=1)
+"#;
+
+const HELPER_SAMPLING: &str = r#"class Sampling(nn.Module):
+    def forward(self, mu, logvar):
+        if self.training:
+            return mu + torch.randn_like(mu) * torch.exp(0.5 * logvar)
+        return mu
+"#;
+
+const HELPER_GAT: &str = r#"class GraphAttention(nn.Module):
+    def __init__(self, in_features, out_features, heads=4, concat=True):
+        super().__init__()
+        self.heads, self.out, self.concat = heads, out_features, concat
+        self.proj = nn.Linear(in_features, heads * out_features, bias=False)
+        self.att_src = nn.Parameter(torch.empty(1, 1, heads, out_features))
+        self.att_dst = nn.Parameter(torch.empty(1, 1, heads, out_features))
+        nn.init.xavier_uniform_(self.att_src)
+        nn.init.xavier_uniform_(self.att_dst)
+        self.leaky = nn.LeakyReLU(0.2)
+
+    def forward(self, x, adj):
+        B, N, _ = x.shape
+        h = self.proj(x).view(B, N, self.heads, self.out)
+        e = self.leaky((h * self.att_src).sum(-1).unsqueeze(2) + (h * self.att_dst).sum(-1).unsqueeze(1))
+        mask = ((adj + torch.eye(N, device=adj.device)) > 0).unsqueeze(-1)
+        a = torch.softmax(e.masked_fill(~mask, float("-inf")), dim=2)
+        out = torch.einsum("bijh,bjhd->bihd", a, h)
+        return out.reshape(B, N, -1) if self.concat else out.mean(dim=2)
+"#;
 
 /// (name, default as JSON — empty string means required, help)
 type ParamDef = (&'static str, &'static str, &'static str);
@@ -172,6 +248,16 @@ impl Block {
             Block::Attention => "attention",
             Block::TransformerEncoder => "transformer_encoder",
             Block::Gcn => "gcn",
+            Block::AvgPool2d => "avgpool2d",
+            Block::GlobalAvgPool => "global_avg_pool",
+            Block::ConvTranspose2d => "conv_transpose2d",
+            Block::Upsample => "upsample",
+            Block::PatchEmbed => "patch_embed",
+            Block::ClsToken => "cls_token",
+            Block::ClsSelect => "cls_select",
+            Block::PositionalEncoding => "positional_encoding",
+            Block::Sampling => "sampling",
+            Block::Gat => "gat",
         }
     }
 
@@ -181,8 +267,10 @@ impl Block {
             Block::Add | Block::Concat | Block::Flatten | Block::Reshape | Block::MeanPool | Block::LastStep => "shape",
             Block::Lstm | Block::Gru | Block::Embedding => "sequence",
             Block::Attention | Block::TransformerEncoder => "attention",
-            Block::Conv1d | Block::Conv2d | Block::MaxPool2d => "vision",
-            Block::Gcn => "graph",
+            Block::Conv1d | Block::Conv2d | Block::MaxPool2d | Block::AvgPool2d | Block::GlobalAvgPool | Block::ConvTranspose2d | Block::Upsample | Block::PatchEmbed => "vision",
+            Block::PositionalEncoding | Block::ClsToken | Block::ClsSelect => "attention",
+            Block::Sampling => "generative",
+            Block::Gcn | Block::Gat => "graph",
         }
     }
 
@@ -208,13 +296,24 @@ impl Block {
             Block::Attention => "Multi-head self-attention over [B, T, E]",
             Block::TransformerEncoder => "Transformer encoder layer (attention + feed-forward) over [B, T, E]",
             Block::Gcn => "Graph convolution: adj @ (x W) over node features [B, N, F] and adjacency [B, N, N]",
+            Block::AvgPool2d => "2-D average pooling",
+            Block::GlobalAvgPool => "Average over the spatial dimensions: [B, C, H, W] -> [B, C]",
+            Block::ConvTranspose2d => "Transposed convolution that upsamples [B, C, H, W] (decoders, U-Net)",
+            Block::Upsample => "Resize [B, C, H, W] by an integer factor (nearest or bilinear)",
+            Block::PatchEmbed => "Cut an image into patches and embed each one: [B, C, H, W] -> [B, N, dim] (Vision Transformer)",
+            Block::ClsToken => "Prepend a learned classification token: [B, T, E] -> [B, T+1, E]",
+            Block::ClsSelect => "Take the first token (the classification token): [B, T, E] -> [B, E]",
+            Block::PositionalEncoding => "Add position information to a sequence [B, T, E] (learned or sinusoidal)",
+            Block::Sampling => "VAE reparameterization: z = mu + eps * exp(logvar / 2) while training, mu at inference",
+            Block::Gat => "Graph attention over node features [B, N, F] and adjacency [B, N, N], with multiple heads",
         }
     }
 
     pub fn inputs(&self) -> &'static [&'static str] {
         match self {
             Block::Add | Block::Concat => &["a", "b"],
-            Block::Gcn => &["x", "adj"],
+            Block::Gcn | Block::Gat => &["x", "adj"],
+            Block::Sampling => &["mu", "logvar"],
             _ => &["in"],
         }
     }
@@ -255,7 +354,18 @@ impl Block {
                 ("dropout", "0.1", "Dropout"),
             ],
             Block::Gcn => &[("out", "", "Output features")],
-            Block::LayerNorm | Block::BatchNorm | Block::Add | Block::Flatten | Block::LastStep => &[],
+            Block::AvgPool2d => &[("kernel", "2", "Window size"), ("stride", "0", "Stride (0 = kernel)")],
+            Block::ConvTranspose2d => &[
+                ("out_channels", "", "Output channels"),
+                ("kernel", "2", "Kernel size"),
+                ("stride", "2", "Stride (the upsampling factor)"),
+                ("padding", "0", "Zero padding"),
+            ],
+            Block::Upsample => &[("scale", "2", "Integer scale factor"), ("mode", "\"nearest\"", "nearest | bilinear")],
+            Block::PatchEmbed => &[("dim", "", "Embedding size"), ("patch", "", "Patch size (image sides must be divisible by it)")],
+            Block::PositionalEncoding => &[("max_len", "512", "Longest supported sequence"), ("kind", "\"learned\"", "learned | sinusoidal")],
+            Block::Gat => &[("out", "", "Output features per head"), ("heads", "4", "Attention heads"), ("concat", "true", "Concatenate heads (else average)")],
+            Block::LayerNorm | Block::BatchNorm | Block::Add | Block::Flatten | Block::LastStep | Block::GlobalAvgPool | Block::ClsToken | Block::ClsSelect | Block::Sampling => &[],
         }
     }
 
@@ -319,6 +429,34 @@ impl Block {
         };
         match self {
             Block::Linear | Block::Gcn => pos("out")?,
+            Block::Gat => {
+                pos("out")?;
+                pos("heads")?;
+            }
+            Block::AvgPool2d => pos("kernel")?,
+            Block::ConvTranspose2d => {
+                pos("out_channels")?;
+                pos("kernel")?;
+                pos("stride")?;
+            }
+            Block::Upsample => {
+                pos("scale")?;
+                let m = gets(p, "mode");
+                if m != "nearest" && m != "bilinear" {
+                    return Err(bad(node, "mode", "must be nearest or bilinear"));
+                }
+            }
+            Block::PatchEmbed => {
+                pos("dim")?;
+                pos("patch")?;
+            }
+            Block::PositionalEncoding => {
+                pos("max_len")?;
+                let k = gets(p, "kind");
+                if k != "learned" && k != "sinusoidal" {
+                    return Err(bad(node, "kind", "must be learned or sinusoidal"));
+                }
+            }
             Block::Lstm | Block::Gru => {
                 pos("hidden")?;
                 pos("layers")?;
@@ -469,6 +607,103 @@ impl Block {
                 let w = conv_len(node, "in", &x[3], k, s, pad)?;
                 Ok(one("out", vec![x[0].clone(), Dim::Const(geti(p, "out_channels")), h, w]))
             }
+            Block::AvgPool2d => {
+                let x = x.unwrap();
+                rank(node, "in", x, 4)?;
+                let k = geti(p, "kernel");
+                let st = if geti(p, "stride") == 0 { k } else { geti(p, "stride") };
+                let h = conv_len(node, "in", &x[2], k, st, 0)?;
+                let w = conv_len(node, "in", &x[3], k, st, 0)?;
+                Ok(one("out", vec![x[0].clone(), x[1].clone(), h, w]))
+            }
+            Block::GlobalAvgPool => {
+                let x = x.unwrap();
+                rank(node, "in", x, 4)?;
+                Ok(one("out", vec![x[0].clone(), x[1].clone()]))
+            }
+            Block::ConvTranspose2d => {
+                let x = x.unwrap();
+                rank(node, "in", x, 4)?;
+                dim_at(node, "in", x, 1)?;
+                let (k, st, pad) = (geti(p, "kernel"), geti(p, "stride"), geti(p, "padding"));
+                let grow = |d: &Dim| match d {
+                    Dim::Const(n) => {
+                        let v = (n - 1) * st - 2 * pad + k;
+                        if v < 1 { Err(shape_err(node, "in", format!("transposed convolution of size {n} would be empty"))) } else { Ok(Dim::Const(v)) }
+                    }
+                    Dim::Sym(s) => Ok(Dim::Sym(format!("{s}'"))),
+                };
+                Ok(one("out", vec![x[0].clone(), Dim::Const(geti(p, "out_channels")), grow(&x[2])?, grow(&x[3])?]))
+            }
+            Block::Upsample => {
+                let x = x.unwrap();
+                rank(node, "in", x, 4)?;
+                let sc = geti(p, "scale");
+                let up = |d: &Dim| match d {
+                    Dim::Const(n) => Dim::Const(n * sc),
+                    Dim::Sym(s) => Dim::Sym(format!("{s}*{sc}")),
+                };
+                Ok(one("out", vec![x[0].clone(), x[1].clone(), up(&x[2]), up(&x[3])]))
+            }
+            Block::PatchEmbed => {
+                let x = x.unwrap();
+                rank(node, "in", x, 4)?;
+                dim_at(node, "in", x, 1)?;
+                let (h, w, pt) = (dim_at(node, "in", x, 2)?, dim_at(node, "in", x, 3)?, geti(p, "patch"));
+                if h % pt != 0 || w % pt != 0 {
+                    return Err(shape_err(node, "in", format!("image {h}x{w} is not divisible by patch size {pt}")));
+                }
+                Ok(one("out", vec![x[0].clone(), Dim::Const((h / pt) * (w / pt)), Dim::Const(geti(p, "dim"))]))
+            }
+            Block::ClsToken => {
+                let x = x.unwrap();
+                rank(node, "in", x, 3)?;
+                last_const(node, "in", x)?;
+                let t = match &x[1] {
+                    Dim::Const(n) => Dim::Const(n + 1),
+                    Dim::Sym(s) => Dim::Sym(format!("{s}+1")),
+                };
+                Ok(one("out", vec![x[0].clone(), t, x[2].clone()]))
+            }
+            Block::ClsSelect => {
+                let x = x.unwrap();
+                rank(node, "in", x, 3)?;
+                Ok(one("out", vec![x[0].clone(), x[2].clone()]))
+            }
+            Block::PositionalEncoding => {
+                let x = x.unwrap();
+                rank(node, "in", x, 3)?;
+                last_const(node, "in", x)?;
+                if let Dim::Const(t) = &x[1] {
+                    if *t > geti(p, "max_len") {
+                        return Err(shape_err(node, "in", format!("sequence length {t} exceeds max_len {}", geti(p, "max_len"))));
+                    }
+                }
+                Ok(one("out", x.clone()))
+            }
+            Block::Sampling => {
+                let (mu, lv) = (&ins["mu"], &ins["logvar"]);
+                if mu != lv {
+                    return Err(shape_err(node, "logvar", format!("mu {} and logvar {} must have the same shape", crate::graph::fmt_shape(mu), crate::graph::fmt_shape(lv))));
+                }
+                Ok(one("out", mu.clone()))
+            }
+            Block::Gat => {
+                let x = &ins["x"];
+                rank(node, "x", x, 3)?;
+                last_const(node, "x", x)?;
+                let adj = &ins["adj"];
+                rank(node, "adj", adj, 3)?;
+                if adj[1] != adj[2] || adj[1] != x[1] {
+                    return Err(shape_err(
+                        node,
+                        "adj",
+                        format!("adjacency {} must be [B, N, N] matching node count of x {}", crate::graph::fmt_shape(adj), crate::graph::fmt_shape(x)),
+                    ));
+                }
+                let out = geti(p, "out") * if getb(p, "concat") { geti(p, "heads") } else { 1 };
+                Ok(one("out", vec![x[0].clone(), x[1].clone(), Dim::Const(out)]))
+            }
             Block::MaxPool2d => {
                 let x = x.unwrap();
                 rank(node, "in", x, 4)?;
@@ -547,6 +782,18 @@ impl Block {
         }
     }
 
+    /// Blocks that are not a stock `torch.nn` layer need a small helper class in the generated code:
+    /// `(class name, Python source)`. Code generation emits each one once.
+    pub fn helper(&self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Block::PositionalEncoding => Some(("PositionalEncoding", HELPER_POSITIONAL)),
+            Block::ClsToken => Some(("ClsToken", HELPER_CLS)),
+            Block::Sampling => Some(("Sampling", HELPER_SAMPLING)),
+            Block::Gat => Some(("GraphAttention", HELPER_GAT)),
+            _ => None,
+        }
+    }
+
     /// Python expression building the `nn.Module`, or None for parameter-free tensor ops.
     pub fn ctor(&self, _node: &str, p: &Params, ins: &BTreeMap<String, Shape>) -> Option<String> {
         let x = ins.get("in").or_else(|| ins.get("x"));
@@ -618,6 +865,29 @@ impl Block {
                 let s = if geti(p, "stride") == 0 { k } else { geti(p, "stride") };
                 format!("nn.MaxPool2d({k}, {s})")
             }
+            Block::AvgPool2d => {
+                let k = geti(p, "kernel");
+                let st = if geti(p, "stride") == 0 { k } else { geti(p, "stride") };
+                format!("nn.AvgPool2d({k}, {st})")
+            }
+            Block::ConvTranspose2d => format!(
+                "nn.ConvTranspose2d({}, {}, kernel_size={}, stride={}, padding={})",
+                dimn(x?, 1),
+                geti(p, "out_channels"),
+                geti(p, "kernel"),
+                geti(p, "stride"),
+                geti(p, "padding")
+            ),
+            Block::Upsample => {
+                let mode = gets(p, "mode");
+                let align = if mode == "bilinear" { ", align_corners=False" } else { "" };
+                format!("nn.Upsample(scale_factor={}, mode='{mode}'{align})", geti(p, "scale"))
+            }
+            Block::PatchEmbed => format!("nn.Conv2d({}, {}, kernel_size={}, stride={})", dimn(x?, 1), geti(p, "dim"), geti(p, "patch"), geti(p, "patch")),
+            Block::ClsToken => format!("ClsToken({})", last(x?)),
+            Block::PositionalEncoding => format!("PositionalEncoding({}, {}, \"{}\")", geti(p, "max_len"), last(x?), gets(p, "kind")),
+            Block::Sampling => "Sampling()".into(),
+            Block::Gat => format!("GraphAttention({}, {}, {}, {})", last(x?), geti(p, "out"), geti(p, "heads"), if getb(p, "concat") { "True" } else { "False" }),
             Block::Flatten => "nn.Flatten()".into(),
             Block::Embedding => format!("nn.Embedding({}, {})", geti(p, "num_embeddings"), geti(p, "dim")),
             Block::Attention => format!("nn.MultiheadAttention({}, {}, batch_first=True)", last(x?), geti(p, "heads")),
@@ -628,7 +898,7 @@ impl Block {
                 geti(p, "ff"),
                 getf(p, "dropout")
             ),
-            Block::Add | Block::Concat | Block::Reshape | Block::MeanPool | Block::LastStep => return None,
+            Block::Add | Block::Concat | Block::Reshape | Block::MeanPool | Block::LastStep | Block::GlobalAvgPool | Block::ClsSelect => return None,
         })
     }
 
@@ -654,6 +924,11 @@ impl Block {
             }
             Block::Attention => format!("{o}, _ = self.{node}({0}, {0}, {0})", iv["in"]),
             Block::Gcn => format!("{o} = torch.bmm({}, self.{node}({}))", iv["adj"], iv["x"]),
+            Block::GlobalAvgPool => format!("{o} = {}.mean(dim=(2, 3))", iv["in"]),
+            Block::ClsSelect => format!("{o} = {}[:, 0]", iv["in"]),
+            Block::PatchEmbed => format!("{o} = self.{node}({}).flatten(2).transpose(1, 2)", iv["in"]),
+            Block::Sampling => format!("{o} = self.{node}({}, {})", iv["mu"], iv["logvar"]),
+            Block::Gat => format!("{o} = self.{node}({}, {})", iv["x"], iv["adj"]),
             _ => format!("{o} = self.{node}({})", iv["in"]),
         }
     }

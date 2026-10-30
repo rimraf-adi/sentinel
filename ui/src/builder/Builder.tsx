@@ -12,10 +12,10 @@ import { Inspector } from './Inspector';
 import { SaveModal } from './SaveModal';
 import type { BNode, Graph } from './types';
 
-const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#a78bfa', vision: '#f472b6', graph: '#22d3ee' };
+const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#a78bfa', vision: '#f472b6', generative: '#fb923c', graph: '#22d3ee' };
 const famColor = (f?: string) => (f && FAM_COLOR[f]) || '#94a3b8';
 const nodeTypes = { block: BlockNodeView, input: InputNodeView, output: OutputNodeView };
-const FAMILY_ORDER = ['core', 'shape', 'sequence', 'attention', 'vision', 'graph'];
+const FAMILY_ORDER = ['core', 'shape', 'sequence', 'attention', 'vision', 'generative', 'graph'];
 const edgeId = (e: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null }) =>
   `${e.source}.${e.sourceHandle}->${e.target}.${e.targetHandle}`;
 

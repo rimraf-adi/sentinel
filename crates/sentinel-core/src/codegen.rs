@@ -31,6 +31,8 @@ fn camel(s: &str) -> String {
 struct ClassBook {
     by_key: BTreeMap<String, String>,
     sources: Vec<String>,
+    /// Helper classes for blocks that are not stock torch.nn layers, emitted once each.
+    helpers: BTreeMap<&'static str, &'static str>,
 }
 
 fn emit_class(class: &str, g: &ValidatedGraph, book: &mut ClassBook, tuple_out: bool) -> String {
@@ -52,6 +54,9 @@ fn emit_class(class: &str, g: &ValidatedGraph, book: &mut ClassBook, tuple_out: 
 
         match kind {
             BlockKind::Fundamental(block) => {
+                if let Some((name, source)) = block.helper() {
+                    book.helpers.insert(name, source);
+                }
                 if let Some(target) = &spec.share {
                     aliases.push_str(&format!("        self.{node} = self.{target}\n"));
                 } else if let Some(c) = block.ctor(node, params, &ins) {
@@ -104,6 +109,10 @@ pub fn generate_model(g: &ValidatedGraph) -> String {
     let mut book = ClassBook::default();
     let model = emit_class("Model", g, &mut book, false);
     let mut out = String::new();
+    for src in book.helpers.values() {
+        out.push_str(src);
+        out.push_str("\n\n");
+    }
     for src in &book.sources {
         out.push_str(src);
         out.push_str("\n\n");

@@ -18,7 +18,7 @@
   --t-fast: 120ms; --t-med: 200ms; --ease: cubic-bezier(.2, .8, .2, 1);
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   /* block families (Builder palette, nodes, minimap) */
-  --fam-core: #94a3b8; --fam-shape: #2dd4bf; --fam-sequence: #fbbf24; --fam-attention: #a78bfa; --fam-vision: #f472b6; --fam-graph: #22d3ee;
+  --fam-core: #94a3b8; --fam-shape: #2dd4bf; --fam-sequence: #fbbf24; --fam-attention: #a78bfa; --fam-vision: #f472b6; --fam-graph: #22d3ee; --fam-generative: #fb923c;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; }
