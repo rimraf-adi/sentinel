@@ -134,6 +134,29 @@ impl ProcessSupervisor {
                         }
                     }
                     status = child.wait() => {
+                        // Drain any remaining lines from stdout and stderr before recording finish
+                        while let Some(line) = if let Some(ref mut reader) = stdout_lines {
+                            reader.next_line().await.ok().flatten()
+                        } else {
+                            None
+                        } {
+                            let mut lock = jobs_ref.write().await;
+                            if let Some(job) = lock.get_mut(&job_id) {
+                                job.logs.push(format!("[stdout] {line}"));
+                            }
+                        }
+
+                        while let Some(line) = if let Some(ref mut reader) = stderr_lines {
+                            reader.next_line().await.ok().flatten()
+                        } else {
+                            None
+                        } {
+                            let mut lock = jobs_ref.write().await;
+                            if let Some(job) = lock.get_mut(&job_id) {
+                                job.logs.push(format!("[stderr] {line}"));
+                            }
+                        }
+
                         let mut lock = jobs_ref.write().await;
                         if let Some(job) = lock.get_mut(&job_id) {
                             job.record.finished_at = Some(chrono::Utc::now());
