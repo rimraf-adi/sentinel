@@ -23,18 +23,54 @@ export interface JobRecord {
 export interface GpuStats {
   index: number;
   name: string;
-  vram_used_bytes: number;
-  vram_total_bytes: number;
-  gpu_util_percent: number;
-  temperature_c: number;
+  vendor: string;
+  vram_used_bytes: number | null;
+  vram_total_bytes: number | null;
+  gpu_util_percent: number | null;
+  temperature_c: number | null;
+  power_w: number | null;
+  driver: string | null;
+  mem_util_percent: number | null;
+  fan_percent: number | null;
+  clock_graphics_mhz: number | null;
+  clock_memory_mhz: number | null;
+  power_limit_w: number | null;
+  pstate: string | null;
 }
-export interface Hardware {
+export interface ProcStat { pid: number; cpu_percent: number; rss_bytes: number; processes: number; io_read_bps: number; io_write_bps: number }
+export interface JobVitals { job_id: string; name: string; stat: ProcStat; gpu_mem_bytes: number | null }
+export interface NetStat { name: string; rx_bps: number; tx_bps: number; rx_total: number; tx_total: number; rx_errors: number; tx_errors: number }
+export interface DiskStat { name: string; mount: string; fs: string; kind: string; total_bytes: number; available_bytes: number; removable: boolean }
+export interface Sensor { label: string; temp_c: number; max_c: number | null; critical_c: number | null }
+export interface Vitals {
   timestamp: string;
   machine_id: string;
   cpu_util_percent: number;
+  per_core: number[];
+  cpu_count: number;
   ram_used_bytes: number;
   ram_total_bytes: number;
+  swap_used_bytes: number;
+  swap_total_bytes: number;
+  load_avg: [number, number, number];
+  uptime_secs: number;
   gpus: GpuStats[];
+  daemon: ProcStat | null;
+  jobs: JobVitals[];
+  cpu_freq_mhz: number[];
+  network: NetStat[];
+  disks: DiskStat[];
+  sensors: Sensor[];
+}
+export type Hardware = Vitals;
+export interface VitalsPoint {
+  t: number; cpu: number; ram_used: number; ram_total: number; swap_used: number;
+  gpus: { util: number | null; mem_used: number | null; mem_total: number | null; temp: number | null; power: number | null }[];
+  daemon_cpu: number | null; daemon_rss: number | null; jobs: number; net_rx: number; net_tx: number;
+}
+export interface SystemInfo {
+  os: string; os_version: string | null; kernel: string | null; host: string | null; arch: string;
+  cpu_brand: string; cpu_count: number; ram_total_bytes: number; version: string; gpu_note: string | null;
 }
 export interface ParamSpec {
   type: 'string' | 'int' | 'float' | 'bool' | 'choice';
@@ -168,6 +204,8 @@ export const api = {
       created_at: new Date().toISOString(),
     }),
   hardware: () => req<Hardware>('/api/hardware'),
+  vitalsHistory: () => req<VitalsPoint[]>('/api/vitals/history'),
+  system: () => req<SystemInfo>('/api/system'),
   components: () => req<Component[]>('/api/components'),
   runComponent: (component_id: string, overrides: Record<string, unknown>) => post<JobRecord>('/api/jobs/run-component', { component_id, overrides }),
   repo: () => req<RepoStatus>('/api/repo/status'),

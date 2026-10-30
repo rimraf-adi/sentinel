@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Hardware } from './api';
+import type { Vitals } from './api';
 
 /** Poll an async source; returns data, error and a manual refresh. */
 export function usePoll<T>(fn: () => Promise<T>, ms: number) {
@@ -25,7 +25,7 @@ export function usePoll<T>(fn: () => Promise<T>, ms: number) {
 
 /** Live hardware telemetry over the daemon WebSocket, with auto-reconnect. */
 export function useTelemetry() {
-  const [hw, setHw] = useState<Hardware | null>(null);
+  const [hw, setHw] = useState<Vitals | null>(null);
   const [online, setOnline] = useState(false);
   useEffect(() => {
     let ws: WebSocket | null = null;

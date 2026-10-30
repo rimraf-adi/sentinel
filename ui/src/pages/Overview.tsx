@@ -30,8 +30,13 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: { repo: RepoStat
           <div className="bar"><div style={{ width: `${ramPct}%` }} /></div><div className="stat-foot">RAM utilization</div></div>
         {hw?.gpus.map((g) => (
           <div className="card" key={g.index}><div className="stat-title">GPU {g.index}</div><div className="stat-value" style={{ fontSize: 16 }}>{g.name}</div>
-            <div className="bar"><div style={{ width: `${g.gpu_util_percent}%` }} /></div>
-            <div className="stat-foot">{g.gpu_util_percent.toFixed(0)}% · {fmtGB(g.vram_used_bytes)}/{fmtGB(g.vram_total_bytes)} GB · {g.temperature_c.toFixed(0)}°C</div></div>
+            {g.gpu_util_percent !== null && <div className="bar"><div style={{ width: `${g.gpu_util_percent}%` }} /></div>}
+            <div className="stat-foot">
+              {g.gpu_util_percent !== null ? `${g.gpu_util_percent.toFixed(0)}%` : 'util n/a'}
+              {g.vram_total_bytes !== null && ` · ${g.vram_used_bytes !== null ? fmtGB(g.vram_used_bytes) + '/' : ''}${fmtGB(g.vram_total_bytes)} GB`}
+              {g.temperature_c !== null && ` · ${g.temperature_c.toFixed(0)}°C`}
+              {g.vendor === 'apple' && ' · live metrics need root on macOS'}
+            </div></div>
         ))}
       </div>
       <div className="card gap-t" style={{ padding: 0 }}>

@@ -3,7 +3,7 @@ import type { MetricPoint } from './api';
 
 export interface Series { id: string; label: string; color: string; points: MetricPoint[] }
 
-const W = 520, H = 220, M = { l: 46, r: 12, t: 10, b: 26 };
+const W = 520, H = 220, M = { l: 66, r: 12, t: 10, b: 26 };
 
 function ticks(min: number, max: number, n = 5): number[] {
   if (min === max) return [min];
@@ -16,7 +16,8 @@ function ticks(min: number, max: number, n = 5): number[] {
 const fmt = (v: number) => (Math.abs(v) >= 1000 || (Math.abs(v) < 0.01 && v !== 0) ? v.toExponential(1) : +v.toPrecision(3) + '');
 
 /** Dependency-free multi-series line chart with hover readout. */
-export function LineChart({ title, series }: { title: string; series: Series[] }) {
+export function LineChart({ title, series, format, xLabel }: { title: string; series: Series[]; format?: (v: number) => string; xLabel?: string }) {
+  const fv = format ?? fmt;
   const [hover, setHover] = useState<number | null>(null);
   const all = series.flatMap((s) => s.points);
   const dom = useMemo(() => {
@@ -42,11 +43,11 @@ export function LineChart({ title, series }: { title: string; series: Series[] }
   return (
     <div className="card">
       <div className="row sp"><b>{title}</b>
-        {hover !== null && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>step {hover}</span>}</div>
+        {hover !== null && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{xLabel ?? 'step'} {hover}</span>}</div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={title}>
         {ticks(dom.y0, dom.y1).map((t) => (
           <g key={t}><line x1={M.l} x2={W - M.r} y1={sy(t)} y2={sy(t)} stroke="#1c1c1c" />
-            <text x={M.l - 6} y={sy(t) + 3} textAnchor="end" fontSize="10" fill="#777">{fmt(t)}</text></g>
+            <text x={M.l - 6} y={sy(t) + 3} textAnchor="end" fontSize="10" fill="#777">{fv(t)}</text></g>
         ))}
         {ticks(dom.x0, dom.x1, 6).map((t) => (
           <text key={t} x={sx(t)} y={H - 8} textAnchor="middle" fontSize="10" fill="#777">{t}</text>
@@ -64,7 +65,7 @@ export function LineChart({ title, series }: { title: string; series: Series[] }
       <div className="legend">
         {series.map((s) => {
           const p = hover === null ? s.points[s.points.length - 1] : s.points.reduce<MetricPoint | null>((a, b) => (a && Math.abs(a.step - hover) <= Math.abs(b.step - hover) ? a : b), null);
-          return <span key={s.id}><i style={{ background: s.color }} />{s.label}{p && <b className="mono"> {fmt(p.value)}</b>}</span>;
+          return <span key={s.id}><i style={{ background: s.color }} />{s.label}{p && <b className="mono"> {fv(p.value)}</b>}</span>;
         })}
       </div>
     </div>

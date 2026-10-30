@@ -9,7 +9,7 @@ import { Sweeps } from './pages/Sweeps';
 import { Components } from './pages/Components';
 import { Builder } from './builder/Builder';
 import { Datasets } from './pages/Datasets';
-import { Machines } from './pages/Machines';
+import { System } from './pages/System';
 import { Code } from './pages/Code';
 
 const TABS = [
@@ -20,7 +20,7 @@ const TABS = [
   { id: 'components', label: 'Components', group: 'Project' },
   { id: 'builder', label: 'Builder', group: 'Project' },
   { id: 'datasets', label: 'Datasets', group: 'Project' },
-  { id: 'machines', label: 'Machines', group: 'Project' },
+  { id: 'system', label: 'System', group: 'Workspace' },
   { id: 'code', label: 'Code (Read-Only)', group: 'Project' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
@@ -91,7 +91,7 @@ export function App() {
             {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInBuilder={openInBuilder} />}
             {tab === 'builder' && <Builder initialComponent={builderComponent} onConsumed={() => setBuilderComponent(null)} refreshJobs={jobs.refresh} go={go} />}
             {tab === 'datasets' && <Datasets datasets={datasets.data ?? []} refresh={datasets.refresh} />}
-            {tab === 'machines' && <Machines hw={hw} />}
+            {tab === 'system' && <System hw={hw} />}
             {tab === 'code' && <Code />}
           </main>
         </div>
