@@ -34,7 +34,12 @@ pub async fn static_handler(uri: Uri) -> Response {
     if path.starts_with("api/") || path.starts_with("ws/") {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let path = if path.is_empty() { "index.html" } else { path };
+    // Old clients and crawlers ask for /favicon.ico; answer with the SVG instead of the SPA's index.html.
+    let path = match path {
+        "" => "index.html",
+        "favicon.ico" => "favicon.svg",
+        p => p,
+    };
     serve(path)
         .or_else(|| serve("index.html"))
         .unwrap_or_else(|| (StatusCode::NOT_FOUND, "UI assets not embedded").into_response())

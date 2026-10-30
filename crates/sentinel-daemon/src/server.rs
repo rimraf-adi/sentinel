@@ -187,9 +187,10 @@ impl Server {
 }
 
 
+/// The Sentinel mark. Embedded from the UI's `public/favicon.svg`, so there is one source of truth.
 async fn favicon_handler() -> impl IntoResponse {
-    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#ffffff"/><polygon points="16,7 25,23 7,23" fill="#000000"/></svg>"##;
-    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], svg)
+    const SVG: &str = include_str!("../../../ui/public/favicon.svg");
+    ([(axum::http::header::CONTENT_TYPE, "image/svg+xml"), (axum::http::header::CACHE_CONTROL, "public, max-age=86400")], SVG)
 }
 
 async fn health_check() -> impl IntoResponse {
