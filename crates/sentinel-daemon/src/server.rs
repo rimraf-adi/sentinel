@@ -23,6 +23,8 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
     pub vitals: VitalsHub,
+    /// Open dashboard WebSockets; with none (and no running jobs) the sampler slows down to save CPU.
+    pub ws_clients: Arc<std::sync::atomic::AtomicUsize>,
     pub supervisor: ProcessSupervisor,
     pub gpu_pool: DynamicGpuPool,
     pub hardware_monitor: Arc<Mutex<HardwareMonitor>>,
@@ -90,11 +92,9 @@ impl VitalsHub {
 
 /// Sample once a second in the background. `sample` shells out to nvidia-smi, so it runs off the async threads.
 pub fn spawn_sampler(state: AppState) {
+    use std::sync::atomic::Ordering;
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(1));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            tick.tick().await;
             let watch: Vec<_> = state
                 .supervisor
                 .list_jobs()
@@ -103,10 +103,13 @@ pub fn spawn_sampler(state: AppState) {
                 .filter(|j| j.status == sentinel_core::models::JobStatus::Running)
                 .filter_map(|j| j.pid.map(|p| (j.spec.id, j.spec.name.clone(), p)))
                 .collect();
+            let busy = !watch.is_empty() || state.ws_clients.load(Ordering::Relaxed) > 0;
             let monitor = state.hardware_monitor.clone();
             if let Ok(v) = tokio::task::spawn_blocking(move || monitor.blocking_lock().sample("local", &watch)).await {
                 state.vitals.push(v).await;
             }
+            // 1 Hz while someone is watching or a job runs; 5 s otherwise (history keeps real timestamps).
+            tokio::time::sleep(Duration::from_secs(if busy { 1 } else { 5 })).await;
         }
     });
 }
@@ -520,6 +523,15 @@ async fn ws_handler(
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
+    use std::sync::atomic::Ordering;
+    state.ws_clients.fetch_add(1, Ordering::Relaxed);
+    struct Guard(Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+    let _guard = Guard(state.ws_clients.clone());
     let mut interval = tokio::time::interval(Duration::from_secs(1));
 
     loop {

@@ -61,6 +61,24 @@ Sentinel addresses these structural bottlenecks through an asynchronous, bifurca
 
 ---
 
+
+## Footprint
+
+Sentinel's own cost, measured by `tests/bench_footprint.py` on a release build (Apple M1, macOS; run it on your machine with
+`cargo build --release -p sentinel-cli && python3 tests/bench_footprint.py`). Training runs are not included.
+
+| Scenario | RSS | CPU (of one core) |
+|---|---|---|
+| daemon idle, no dashboard | 15 MB | 0.16% |
+| dashboard open | 15 MB | 0.74% |
+| 3 dashboards polling | 16 MB | 0.91% |
+| ~100 API requests/s | 16 MB | 2.7% |
+| watching one running job | 18 MB | 1.5% |
+
+The daemon samples once a second only while a dashboard is connected or a job is running, otherwise every five seconds. All
+open dashboards share one sampler, so extra tabs cost almost nothing. The binary is 7 MB with the dashboard embedded.
+`sentinel doctor` peaks near 200 MB only because it imports PyTorch in a child process to check it.
+
 ## 2. Core Capabilities
 
 ### 2.1 Asynchronous Process Supervision & GPU Allocation

@@ -407,6 +407,7 @@ async fn run_dev(port: u16, host: &str) -> anyhow::Result<()> {
 
     let state = sentinel_daemon::server::AppState {
         vitals: Default::default(),
+        ws_clients: Default::default(),
         supervisor,
         gpu_pool,
         hardware_monitor,

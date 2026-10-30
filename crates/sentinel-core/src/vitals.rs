@@ -130,6 +130,11 @@ pub struct VitalsMonitor {
     last_net: Instant,
     last_proc: Instant,
     last_disks: Instant,
+    /// Temperatures move slowly and reading every sensor is costly (IOKit on Apple Silicon): cache for 5 s.
+    sensor_cache: (Instant, Vec<Sensor>),
+    /// Full process scans discover new children; in between, only known job processes are refreshed.
+    last_full_scan: Option<Instant>,
+    known_pids: Vec<Pid>,
     nvidia: bool,
     /// GPUs we can only name (Apple, or anything without nvidia-smi): shown without invented metrics.
     named_only: Vec<GpuStats>,
@@ -164,6 +169,9 @@ impl VitalsMonitor {
             last_net: now,
             last_proc: now,
             last_disks: now,
+            sensor_cache: (now - Duration::from_secs(60), Vec::new()),
+            last_full_scan: None,
+            known_pids: Vec::new(),
             nvidia,
             named_only,
             gpu_error,
@@ -220,11 +228,17 @@ impl VitalsMonitor {
         self.sys.refresh_memory();
         let me = sysinfo::get_current_pid().ok();
         if watch.is_empty() {
+            self.known_pids.clear();
+            self.last_full_scan = None;
             if let Some(me) = me {
                 self.sys.refresh_processes(ProcessesToUpdate::Some(&[me]));
             }
-        } else {
+        } else if self.last_full_scan.map_or(true, |t| t.elapsed() >= Duration::from_secs(3)) {
             self.sys.refresh_processes(ProcessesToUpdate::All);
+            self.last_full_scan = Some(Instant::now());
+        } else {
+            let pids: Vec<Pid> = me.into_iter().chain(self.known_pids.iter().copied()).collect();
+            self.sys.refresh_processes(ProcessesToUpdate::Some(&pids));
         }
         let now = Instant::now();
         let proc_dt = now.duration_since(self.last_proc).as_secs_f64().max(0.001);
@@ -273,16 +287,19 @@ impl VitalsMonitor {
                 ProcStat { pid: me.as_u32(), cpu_percent: p.cpu_usage(), rss_bytes: p.memory(), processes: 1, io_read_bps: io.read_bytes as f64 / proc_dt, io_write_bps: io.written_bytes as f64 / proc_dt }
             })
         });
+        let mut known: Vec<Pid> = Vec::new();
         let jobs = watch
             .iter()
             .filter(|(_, _, pid)| self.sys.process(Pid::from_u32(*pid)).is_some())
             .map(|(id, name, pid)| {
                 let (stat, pids) = tree(Pid::from_u32(*pid), &self.sys);
+                known.extend(pids.iter().map(|p| Pid::from_u32(*p)));
                 let gpu_mem = if self.nvidia { Some(pids.iter().filter_map(|p| gpu_apps.get(p)).sum()) } else { None };
                 JobVitals { job_id: *id, name: name.clone(), stat, gpu_mem_bytes: gpu_mem }
             })
             .collect();
 
+        self.known_pids = known;
         let load = System::load_average();
         Vitals {
             timestamp: chrono::Utc::now(),
@@ -373,7 +390,16 @@ impl VitalsMonitor {
     }
 
     fn sensors(&mut self) -> Vec<Sensor> {
+        if self.sensor_cache.0.elapsed() < Duration::from_secs(5) {
+            return self.sensor_cache.1.clone();
+        }
         self.components.refresh();
+        let fresh = self.read_sensors();
+        self.sensor_cache = (Instant::now(), fresh.clone());
+        fresh
+    }
+
+    fn read_sensors(&self) -> Vec<Sensor> {
         self.components
             .iter()
             .filter(|c| c.temperature().is_finite() && c.temperature() > 0.0)
