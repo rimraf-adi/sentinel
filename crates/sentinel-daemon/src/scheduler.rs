@@ -1,74 +1,60 @@
 //! Scheduler, Hardware Monitor, and Dynamic GPU Worker Pool.
 
-use sentinel_core::models::{GpuStats, HardwareStats};
+use sentinel_core::models::HardwareStats;
+use sentinel_core::vitals::{Vitals, VitalsMonitor, Watch};
 use std::collections::HashSet;
 use std::sync::Arc;
-use sysinfo::System;
 use tokio::sync::Mutex;
 
-/// Hardware monitor collecting system and GPU telemetry.
+/// Hardware monitor: real host, GPU and process telemetry (see `sentinel_core::vitals`).
+/// GPUs are only reported when they exist; nothing is simulated.
 pub struct HardwareMonitor {
-    sys: System,
-    detected_gpus: Vec<GpuStats>,
+    vitals: VitalsMonitor,
+}
+
+impl Default for HardwareMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HardwareMonitor {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-
-        // In production on NVIDIA boxes, NVML discovers GPUs.
-        // For portable cross-platform execution (macOS / CI / CPU boxes),
-        // we provide fallback detection.
-        let detected_gpus = Self::detect_system_gpus();
-
-        Self { sys, detected_gpus }
+        Self { vitals: VitalsMonitor::new() }
     }
 
-    fn detect_system_gpus() -> Vec<GpuStats> {
-        // Detect mock/emulated or real compute devices
-        #[cfg(target_os = "macos")]
-        {
-            // Apple Silicon unified GPU representation
-            vec![GpuStats {
-                index: 0,
-                name: "Apple Silicon Metal GPU".to_string(),
-                vram_used_bytes: 1024 * 1024 * 1024 * 4, // 4GB placeholder
-                vram_total_bytes: 1024 * 1024 * 1024 * 16, // 16GB unified
-                gpu_util_percent: 15.0,
-                temperature_c: 42.0,
-            }]
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // Default 1 mock/detectable GPU if NVML is not active
-            vec![GpuStats {
-                index: 0,
-                name: "Primary Compute Device".to_string(),
-                vram_used_bytes: 1024 * 1024 * 512,
-                vram_total_bytes: 1024 * 1024 * 1024 * 8,
-                gpu_util_percent: 0.0,
-                temperature_c: 35.0,
-            }]
+    /// Full snapshot including per-core CPU, swap, load, daemon footprint and per-job process trees.
+    pub fn sample(&mut self, machine_id: &str, watch: &[Watch]) -> Vitals {
+        self.vitals.sample(machine_id, watch)
+    }
+
+    /// Number of NVIDIA GPUs that can actually be scheduled (CUDA_VISIBLE_DEVICES applies to these only).
+    pub fn schedulable_gpus(&mut self) -> u32 {
+        if self.vitals.has_nvidia() {
+            self.vitals.sample("local", &[]).gpus.iter().filter(|g| g.vendor == "nvidia").count() as u32
+        } else {
+            0
         }
     }
 
-    /// Refresh and collect latest hardware snapshot.
+    pub fn system_info(&mut self) -> sentinel_core::vitals::SystemInfo {
+        self.vitals.system_info()
+    }
+
+    pub fn gpu_error(&self) -> Option<&str> {
+        self.vitals.gpu_error()
+    }
+
+    /// Compact snapshot kept for the original `/api/hardware` shape.
     pub fn collect_stats(&mut self, machine_id: &str) -> HardwareStats {
-        self.sys.refresh_cpu_usage();
-        self.sys.refresh_memory();
-
-        let cpu_util = self.sys.global_cpu_usage();
-        let ram_used = self.sys.used_memory();
-        let ram_total = self.sys.total_memory();
-
+        let v = self.vitals.sample(machine_id, &[]);
         HardwareStats {
-            timestamp: chrono::Utc::now(),
-            machine_id: machine_id.to_string(),
-            cpu_util_percent: cpu_util,
-            ram_used_bytes: ram_used,
-            ram_total_bytes: ram_total,
-            gpus: self.detected_gpus.clone(),
+            timestamp: v.timestamp,
+            machine_id: v.machine_id,
+            cpu_util_percent: v.cpu_util_percent,
+            ram_used_bytes: v.ram_used_bytes,
+            ram_total_bytes: v.ram_total_bytes,
+            gpus: v.gpus,
         }
     }
 }
@@ -141,7 +127,8 @@ mod tests {
 
         assert_eq!(stats.machine_id, "local-node");
         assert!(stats.ram_total_bytes > 0);
-        assert!(!stats.gpus.is_empty());
+        // GPUs are whatever the machine really has: possibly none, never invented.
+        assert!(stats.gpus.iter().all(|g| !g.name.is_empty()));
     }
 
     #[tokio::test]

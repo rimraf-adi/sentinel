@@ -1,7 +1,7 @@
 //! Workspace detection for the dashboard header and `/api/repo/status`.
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceInfo {
@@ -47,7 +47,7 @@ fn project_name(dir: &Path) -> String {
 }
 
 pub fn shorten_path(path: &Path) -> String {
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = sentinel_core::platform::home_dir() {
         if let Ok(suffix) = path.strip_prefix(&home) {
             return format!("~/{}", suffix.display());
         }

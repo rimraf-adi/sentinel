@@ -1079,6 +1079,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1091,6 +1092,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sysinfo",
  "thiserror",
  "tracing",
  "uuid",
@@ -1104,7 +1106,6 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
- "libc",
  "mime_guess",
  "rust-embed",
  "sentinel-core",

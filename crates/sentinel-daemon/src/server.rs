@@ -12,7 +12,7 @@ use sentinel_core::models::{HardwareStats, JobRecord, JobSpec, RunMode};
 use sentinel_core::components::ComponentRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,10 +22,93 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
+    pub vitals: VitalsHub,
     pub supervisor: ProcessSupervisor,
     pub gpu_pool: DynamicGpuPool,
     pub hardware_monitor: Arc<Mutex<HardwareMonitor>>,
     pub components: Arc<ComponentRegistry>,
+}
+
+/// Compact history sample (about 150 bytes) for charts; the full snapshot is only kept for "now".
+#[derive(Debug, Clone, Serialize)]
+pub struct VitalsPoint {
+    pub t: i64,
+    pub cpu: f32,
+    pub ram_used: u64,
+    pub ram_total: u64,
+    pub swap_used: u64,
+    pub gpus: Vec<GpuPoint>,
+    pub daemon_cpu: Option<f32>,
+    pub daemon_rss: Option<u64>,
+    pub jobs: usize,
+    /// Total network throughput across interfaces, bytes/second.
+    pub net_rx: f64,
+    pub net_tx: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct GpuPoint {
+    pub util: Option<f32>,
+    pub mem_used: Option<u64>,
+    pub mem_total: Option<u64>,
+    pub temp: Option<f32>,
+    pub power: Option<f32>,
+}
+
+const HISTORY_CAP: usize = 900; // 15 minutes at 1 Hz
+
+/// Latest vitals plus a ring buffer of history, filled by one background sampler (not per client).
+#[derive(Clone, Default)]
+pub struct VitalsHub {
+    pub latest: Arc<tokio::sync::RwLock<Option<sentinel_core::vitals::Vitals>>>,
+    pub history: Arc<tokio::sync::RwLock<VecDeque<VitalsPoint>>>,
+}
+
+impl VitalsHub {
+    pub async fn push(&self, v: sentinel_core::vitals::Vitals) {
+        let point = VitalsPoint {
+            t: v.timestamp.timestamp_millis(),
+            cpu: v.cpu_util_percent,
+            ram_used: v.ram_used_bytes,
+            ram_total: v.ram_total_bytes,
+            swap_used: v.swap_used_bytes,
+            gpus: v.gpus.iter().map(|g| GpuPoint { util: g.gpu_util_percent, mem_used: g.vram_used_bytes, mem_total: g.vram_total_bytes, temp: g.temperature_c, power: g.power_w }).collect(),
+            daemon_cpu: v.daemon.as_ref().map(|d| d.cpu_percent),
+            daemon_rss: v.daemon.as_ref().map(|d| d.rss_bytes),
+            jobs: v.jobs.len(),
+            net_rx: v.network.iter().map(|n| n.rx_bps).sum(),
+            net_tx: v.network.iter().map(|n| n.tx_bps).sum(),
+        };
+        let mut h = self.history.write().await;
+        if h.len() >= HISTORY_CAP {
+            h.pop_front();
+        }
+        h.push_back(point);
+        *self.latest.write().await = Some(v);
+    }
+}
+
+/// Sample once a second in the background. `sample` shells out to nvidia-smi, so it runs off the async threads.
+pub fn spawn_sampler(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            let watch: Vec<_> = state
+                .supervisor
+                .list_jobs()
+                .await
+                .into_iter()
+                .filter(|j| j.status == sentinel_core::models::JobStatus::Running)
+                .filter_map(|j| j.pid.map(|p| (j.spec.id, j.spec.name.clone(), p)))
+                .collect();
+            let monitor = state.hardware_monitor.clone();
+            if let Ok(v) = tokio::task::spawn_blocking(move || monitor.blocking_lock().sample("local", &watch)).await {
+                state.vitals.push(v).await;
+            }
+        }
+    });
 }
 
 impl AppState {
@@ -52,6 +135,9 @@ impl Server {
             .route("/api/jobs/:id/stop", post(stop_job))
             .route("/api/jobs/:id/logs", get(get_job_logs))
             .route("/api/hardware", get(get_hardware))
+            .route("/api/vitals", get(get_vitals))
+            .route("/api/vitals/history", get(get_vitals_history))
+            .route("/api/system", get(get_system))
             .route("/api/components/save", post(save_component))
             .route("/api/schema", get(schema_for_path))
             .route("/api/datasets/:name/schema", get(schema_for_dataset))
@@ -224,8 +310,29 @@ async fn get_job_logs(
 }
 
 async fn get_hardware(State(state): State<AppState>) -> Json<HardwareStats> {
-    let stats = state.hardware_monitor.lock().await.collect_stats("local");
-    Json(stats)
+    if let Some(v) = state.vitals.latest.read().await.clone() {
+        return Json(HardwareStats {
+            timestamp: v.timestamp,
+            machine_id: v.machine_id,
+            cpu_util_percent: v.cpu_util_percent,
+            ram_used_bytes: v.ram_used_bytes,
+            ram_total_bytes: v.ram_total_bytes,
+            gpus: v.gpus,
+        });
+    }
+    Json(state.hardware_monitor.lock().await.collect_stats("local"))
+}
+
+async fn get_vitals(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.vitals.latest.read().await.clone())
+}
+
+async fn get_vitals_history(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.vitals.history.read().await.iter().cloned().collect::<Vec<_>>())
+}
+
+async fn get_system(State(state): State<AppState>) -> impl IntoResponse {
+    Json(state.hardware_monitor.lock().await.system_info())
 }
 
 async fn list_components(State(state): State<AppState>) -> impl IntoResponse {
@@ -310,7 +417,7 @@ async fn get_file_content(Query(q): Query<FileContentQuery>) -> Result<Json<serd
     let canonical = cwd.canonicalize().unwrap_or(cwd);
 
     let expanded = if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        if let Some(home) = sentinel_core::platform::home_dir() {
             home.join(stripped)
         } else {
             PathBuf::from(raw)
@@ -412,16 +519,14 @@ async fn ws_handler(
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {
-    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                let stats = state.hardware_monitor.lock().await.collect_stats("local");
-                let msg = json!({
-                    "type": "telemetry",
-                    "data": stats
-                });
+                // Read the shared sample; many open tabs must not multiply the sampling work.
+                let Some(v) = state.vitals.latest.read().await.clone() else { continue };
+                let msg = json!({ "type": "telemetry", "data": v });
                 if socket.send(Message::Text(msg.to_string())).await.is_err() {
                     break;
                 }
@@ -607,7 +712,7 @@ async fn graph_run(
     let script = sentinel_core::sdk::write_generated_script(&root, &id, &spec.id.simple().to_string()[..8], &code).map_err(io)?;
 
     spec.component_id = Some(id.clone());
-    spec.command = Some(format!("python3 '{}'", script.display()));
+    spec.command = Some(sentinel_core::platform::python_script_command(&script));
     spec.env_vars.insert("PYTHONPATH".into(), sentinel_core::sdk::python_path(&root).map_err(io)?);
     spec.working_dir = root.display().to_string();
 

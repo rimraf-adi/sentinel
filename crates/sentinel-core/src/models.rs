@@ -112,15 +112,34 @@ pub struct HardwareStats {
     pub gpus: Vec<GpuStats>,
 }
 
-/// Per-GPU telemetry metrics.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Per-GPU telemetry. Every metric is optional: a value the platform cannot report is `None`,
+/// never a made-up number (Apple GPUs, for instance, expose no live utilization without root).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GpuStats {
     pub index: u32,
     pub name: String,
-    pub vram_used_bytes: u64,
-    pub vram_total_bytes: u64,
-    pub gpu_util_percent: f32,
-    pub temperature_c: f32,
+    /// `nvidia` | `apple` | `amd` | `intel` | `other`
+    pub vendor: String,
+    pub vram_used_bytes: Option<u64>,
+    pub vram_total_bytes: Option<u64>,
+    pub gpu_util_percent: Option<f32>,
+    pub temperature_c: Option<f32>,
+    pub power_w: Option<f32>,
+    pub driver: Option<String>,
+    /// Memory-controller utilization (not the same as memory used).
+    #[serde(default)]
+    pub mem_util_percent: Option<f32>,
+    #[serde(default)]
+    pub fan_percent: Option<f32>,
+    #[serde(default)]
+    pub clock_graphics_mhz: Option<u32>,
+    #[serde(default)]
+    pub clock_memory_mhz: Option<u32>,
+    #[serde(default)]
+    pub power_limit_w: Option<f32>,
+    /// Performance state, `P0` (max) to `P12`.
+    #[serde(default)]
+    pub pstate: Option<String>,
 }
 
 /// Single metric point logged during training.
@@ -203,7 +222,7 @@ impl DatasetSpec {
     pub fn inspect(&mut self, workspace_root: &std::path::Path) {
         let raw_path = self.path.trim();
         let expanded = if let Some(stripped) = raw_path.strip_prefix("~/") {
-            if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+            if let Some(home) = crate::platform::home_dir() {
                 home.join(stripped)
             } else {
                 std::path::PathBuf::from(raw_path)

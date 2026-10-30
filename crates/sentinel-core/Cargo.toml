@@ -16,3 +16,4 @@ chrono.workspace = true
 uuid.workspace = true
 tracing.workspace = true
 csv.workspace = true
+sysinfo.workspace = true

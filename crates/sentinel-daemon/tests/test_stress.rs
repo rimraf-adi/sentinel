@@ -1,3 +1,4 @@
+#![cfg(unix)] // these stress tests drive POSIX shell constructs (seq, $(...), >&2)
 use sentinel_core::models::{JobSpec, JobStatus, RunMode};
 use sentinel_daemon::scheduler::DynamicGpuPool;
 use sentinel_daemon::server::Server;

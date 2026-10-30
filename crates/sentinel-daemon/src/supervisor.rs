@@ -67,8 +67,10 @@ impl ProcessSupervisor {
         };
 
         // Prepare shell execution
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(&cmd_string);
+        // `sh -c` on Unix, `cmd /C` on Windows.
+        let (shell, shell_args) = sentinel_core::platform::shell_invocation(&cmd_string);
+        let mut cmd = Command::new(shell);
+        cmd.args(shell_args);
         cmd.current_dir(&spec.working_dir);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
@@ -233,10 +235,8 @@ impl ProcessSupervisor {
         let job = lock.get_mut(&job_id).ok_or(SupervisorError::JobNotFound(job_id))?;
 
         if let Some(pid) = job.child_id {
-            // Send SIGTERM to process
-            unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
+            // SIGTERM on Unix, `taskkill /T /F` on Windows
+            sentinel_core::platform::terminate_process(pid);
             job.record.status = JobStatus::Cancelled;
             job.record.finished_at = Some(chrono::Utc::now());
             if let Some(s) = &self.store {
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn test_supervisor_terminate_job() {
         let supervisor = ProcessSupervisor::new();
-        let spec = JobSpec::new("long-job", RunMode::Command).with_command("sleep 10");
+        let spec = JobSpec::new("long-job", RunMode::Command).with_command(idle(10));
 
         let job_id = spec.id;
         supervisor.start_job(spec).await.expect("start long job");
@@ -309,6 +309,11 @@ mod tests {
 
         let stopped = supervisor.get_job(job_id).await.expect("find job");
         assert_eq!(stopped.status, JobStatus::Cancelled);
+    }
+
+    /// A command that idles for about `secs` seconds on any OS.
+    fn idle(secs: u32) -> String {
+        if cfg!(windows) { format!("ping -n {} 127.0.0.1 >nul", secs + 1) } else { format!("sleep {secs}") }
     }
 
     fn tmp(tag: &str) -> std::path::PathBuf {
@@ -337,7 +342,7 @@ mod tests {
     async fn test_running_jobs_become_failed_after_restart() {
         let dir = tmp("orphan");
         let first = ProcessSupervisor::with_store(JobStore::open(&dir).unwrap());
-        let spec = JobSpec::new("orphan", RunMode::Command).with_command("sleep 30");
+        let spec = JobSpec::new("orphan", RunMode::Command).with_command(idle(30));
         let id = spec.id;
         first.start_job(spec).await.unwrap();
         tokio::time::sleep(Duration::from_millis(80)).await;
@@ -348,13 +353,13 @@ mod tests {
         let rec = second.get_job(id).await.unwrap();
         assert_eq!(rec.status, JobStatus::Failed);
         assert!(rec.error_message.unwrap().contains("restarted"));
-        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+        sentinel_core::platform::terminate_process(pid);
     }
 
     #[tokio::test]
     async fn test_stopped_job_stays_cancelled_after_process_exits() {
         let supervisor = ProcessSupervisor::new();
-        let spec = JobSpec::new("stop-me", RunMode::Command).with_command("sleep 10");
+        let spec = JobSpec::new("stop-me", RunMode::Command).with_command(idle(10));
         let id = spec.id;
         supervisor.start_job(spec).await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;

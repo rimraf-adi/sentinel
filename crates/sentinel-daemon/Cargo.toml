@@ -23,6 +23,5 @@ sysinfo.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 futures.workspace = true
-libc = "0.2"
 rust-embed = "8"
 mime_guess = "2"

@@ -1,3 +1,5 @@
+mod diag;
+
 use clap::{Parser, Subcommand};
 use sentinel_core::export::ScriptExporter;
 use sentinel_core::scaffold::ProjectScaffolder;
@@ -24,6 +26,9 @@ enum Commands {
     Dev {
         #[arg(short, long, default_value = "2512")]
         port: u16,
+        /// Address to listen on. Loopback by default: the API can start processes and has no authentication.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
     },
     /// Train a graph component in the foreground (component id or path to a component YAML)
     Run {
@@ -51,6 +56,35 @@ enum Commands {
         component: String,
         #[arg(short, long, default_value = "train_standalone.py")]
         output: String,
+    },
+    /// One-shot system vitals: CPU, memory, swap, load, GPUs, and the daemon's jobs
+    Status {
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+        #[arg(short, long, default_value = "2512")]
+        port: u16,
+    },
+    /// Live vitals, refreshed in place (uses the daemon's per-job view when it is running)
+    Top {
+        /// Seconds between refreshes
+        #[arg(short, long, default_value = "1")]
+        interval: f32,
+        #[arg(short, long, default_value = "2512")]
+        port: u16,
+        /// How many of the busiest processes to list (0 hides the list)
+        #[arg(long, default_value = "8")]
+        procs: usize,
+    },
+    /// List GPUs with live utilization, memory, temperature and power (nvidia-smi on NVIDIA machines)
+    Gpus {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check Python, PyTorch, GPU drivers, ports and project setup, with fixes for this OS
+    Doctor {
+        #[arg(short, long, default_value = "2512")]
+        port: u16,
     },
     /// Initialize a new Sentinel project
     New {
@@ -110,8 +144,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Dev { port }) => {
-            run_dev(port).await?;
+        Some(Commands::Dev { port, host }) => {
+            run_dev(port, &host).await?;
         }
         Some(Commands::Run { component, set }) => {
             let g = build_graph(&component, &set)?;
@@ -119,8 +153,8 @@ async fn main() -> anyhow::Result<()> {
             let root = std::env::current_dir()?;
             let script = sentinel_core::sdk::write_generated_script(&root, &component, &uuid::Uuid::new_v4().simple().to_string()[..8], &code)?;
             println!("Running {component}  (script: {})", script.display());
-            let python = if cfg!(windows) { "python" } else { "python3" };
-            let status = tokio::process::Command::new(python)
+            let python = sentinel_core::platform::python_exe();
+            let status = tokio::process::Command::new(&python)
                 .arg(&script)
                 .env("PYTHONPATH", sentinel_core::sdk::python_path(&root)?)
                 .status()
@@ -130,6 +164,10 @@ async fn main() -> anyhow::Result<()> {
                 std::process::exit(status.code().unwrap_or(1));
             }
         }
+        Some(Commands::Status { json, port }) => diag::status(json, port)?,
+        Some(Commands::Top { interval, port, procs }) => diag::top(interval, port, procs).await?,
+        Some(Commands::Gpus { json }) => diag::gpus(json)?,
+        Some(Commands::Doctor { port }) => diag::doctor(port)?,
         Some(Commands::Sweep { config }) => {
             println!("🚀 Launching Sentinel Hyperparameter Sweep with config: {config}");
             let mut cmd = tokio::process::Command::new("uv");
@@ -320,7 +358,7 @@ async fn main() -> anyhow::Result<()> {
         }
         None => {
             // Default run on port 2512
-            run_dev(2512).await?;
+            run_dev(2512, "127.0.0.1").await?;
         }
     }
 
@@ -351,7 +389,7 @@ fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core:
     Ok(c.build_graph(&overrides)?)
 }
 
-async fn run_dev(port: u16) -> anyhow::Result<()> {
+async fn run_dev(port: u16, host: &str) -> anyhow::Result<()> {
     let supervisor = match sentinel_daemon::store::JobStore::open(".sentinel/jobs") {
         Ok(store) => sentinel_daemon::supervisor::ProcessSupervisor::with_store(store),
         Err(e) => {
@@ -359,25 +397,30 @@ async fn run_dev(port: u16) -> anyhow::Result<()> {
             sentinel_daemon::supervisor::ProcessSupervisor::new()
         }
     };
-    let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(4);
-    let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(
-        sentinel_daemon::scheduler::HardwareMonitor::new(),
-    ));
+    let mut monitor = sentinel_daemon::scheduler::HardwareMonitor::new();
+    // The pool holds the GPUs that really exist (NVIDIA, via nvidia-smi); CPU-only machines get an empty pool.
+    let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(monitor.schedulable_gpus());
+    let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(monitor));
     let mut registry = ComponentRegistry::new();
     let _ = registry.load_from_dir(Path::new("components"));
     let components = std::sync::Arc::new(registry);
 
     let state = sentinel_daemon::server::AppState {
+        vitals: Default::default(),
         supervisor,
         gpu_pool,
         hardware_monitor,
         components,
     };
 
+    sentinel_daemon::server::spawn_sampler(state.clone());
     let app = sentinel_daemon::server::Server::router(state);
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    println!("🚀 Sentinel Daemon active at http://localhost:{port}");
+    println!("🚀 Sentinel Daemon active at http://{}:{port}", if host == "0.0.0.0" { "localhost" } else { host });
+    if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+        println!("⚠️  Listening on {host}: anyone who can reach this port can start processes on this machine (no authentication).");
+    }
     println!("   API health: http://localhost:{port}/api/health");
     println!("   WebSocket telemetry: ws://localhost:{port}/ws/live");
 
