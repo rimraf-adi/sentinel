@@ -93,7 +93,12 @@ uxML/
 ├── uv.lock                             # Pinned Python dependencies lockfile (torch, mlflow, optuna)
 ├── sentinel.md                         # Formal technical specification and architectural blueprint
 ├── README.md                           # Master project documentation, quickstart, and CLI guide
+├── guide.md                            # Comprehensive operational guide for autonomous agents
 ├── FILES.md                            # Directory tree and file-by-file agentic handoff summary (this file)
+├── .agents/
+│   └── skills/
+│       └── sentinel-integration/
+│           └── SKILL.md                # Antigravity skill for agents to hook into Sentinel codebases
 └── .gitignore                          # Ignores build artifacts (target/, .venv/, dist/, mlruns/)
 ```
 
@@ -107,6 +112,8 @@ uxML/
 * **`uv.lock`**: Pinned lockfile for Python packages (PyTorch, torchvision, MLflow, Optuna, PyYAML).
 * **`sentinel.md`**: Master architecture document containing the locked specification, philosophy, and roadmaps.
 * **`README.md`**: Master user-facing documentation, quickstart, feature overview, CLI reference, and architecture guide.
+* **`guide.md`**: Operational guide for autonomous AI agents instructing how to ground, inspect, launch, monitor, and export Sentinel-supervised workflows.
+* **`.agents/skills/sentinel-integration/SKILL.md`**: Antigravity workspace skill packaging operational commands and protocols for AI agents interacting with Sentinel.
 * **`FILES.md`**: This file.
 * **`.github/workflows/release.yml`**: GitHub Actions matrix workflow building cross-platform wheels via `maturin-action` for:
   1. `x86_64-unknown-linux-gnu` (Linux x86_64)
