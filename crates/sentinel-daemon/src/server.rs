@@ -5,11 +5,12 @@ use crate::supervisor::ProcessSupervisor;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Json};
+use axum::response::{Html, IntoResponse, Json};
 use axum::routing::{get, post};
 use axum::Router;
 use sentinel_core::models::{HardwareStats, JobRecord, JobSpec};
 use sentinel_core::templates::TemplateRegistry;
+use sentinel_ui::{DashboardState, DashboardView};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,6 +32,7 @@ impl Server {
     /// Create router with all Sentinel Daemon REST & WebSocket endpoints.
     pub fn router(state: AppState) -> Router {
         Router::new()
+            .route("/", get(dashboard_page))
             .route("/api/health", get(health_check))
             .route("/api/jobs", get(list_jobs).post(submit_job))
             .route("/api/jobs/:id", get(get_job))
@@ -68,6 +70,16 @@ impl Server {
 
         downsampled
     }
+}
+
+async fn dashboard_page(State(state): State<AppState>) -> Html<String> {
+    let stats = state.hardware_monitor.lock().await.collect_stats("local");
+    let jobs = state.supervisor.list_jobs().await;
+    let templates: Vec<_> = state.templates.list().into_iter().cloned().collect();
+    let ui_state = DashboardState::new();
+
+    let html = DashboardView::render_html(&ui_state, Some(&stats), &jobs, &templates);
+    Html(html)
 }
 
 async fn health_check() -> impl IntoResponse {

@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 sentinel-core.workspace = true
+sentinel-ui.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

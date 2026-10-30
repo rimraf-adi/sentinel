@@ -1,10 +1,7 @@
-//! Sentinel Web UI: Pure Rust Leptos / Dioxus WASM interface.
+//! Sentinel Web UI: Pure Rust WASM & HTML dashboard interface.
 
 pub mod state;
+pub mod view;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UiMode {
-    ReadOnly,
-    Editing,
-    Idle,
-}
+pub use state::{DashboardMode, DashboardState};
+pub use view::DashboardView;
