@@ -9,6 +9,7 @@ pub mod graph;
 pub mod export;
 pub mod models;
 pub mod scaffold;
+pub mod sdk;
 pub mod storage;
 pub mod components;
 pub mod tracking;

@@ -133,6 +133,11 @@ async fn submit_job(
 
     let mut final_spec = spec;
     final_spec.gpu_ids = allocated_gpus;
+    if !final_spec.env_vars.contains_key("PYTHONPATH") {
+        if let Ok(pp) = sentinel_core::sdk::python_path(&project_root()) {
+            final_spec.env_vars.insert("PYTHONPATH".into(), pp);
+        }
+    }
 
     match state.supervisor.start_job(final_spec).await {
         Ok(record) => Ok(Json(record)),
@@ -593,25 +598,18 @@ async fn graph_run(
     let (id, g) = resolve_graph(&state, &req)?;
     let code = compile(&g, &id, false)?;
 
-    let dir = std::env::current_dir()
-        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .join(".sentinel")
-        .join("generated");
-    std::fs::create_dir_all(&dir).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let root = project_root();
+    let io = |e: std::io::Error| api_err(StatusCode::INTERNAL_SERVER_ERROR, e);
 
     // One script per job: concurrent runs of the same component (e.g. a sweep) must not
     // overwrite each other's generated code.
     let mut spec = JobSpec::new(format!("graph-{id}"), RunMode::Command);
-    let file_stem: String = id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-    let script = dir.join(format!("{file_stem}-{}.py", &spec.id.simple().to_string()[..8]));
-    std::fs::write(&script, code).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let script = sentinel_core::sdk::write_generated_script(&root, &id, &spec.id.simple().to_string()[..8], &code).map_err(io)?;
 
     spec.component_id = Some(id.clone());
     spec.command = Some(format!("python3 '{}'", script.display()));
-    if let Ok(sdk) = std::env::var("SENTINEL_SDK_PATH") {
-        spec.env_vars.insert("PYTHONPATH".into(), sdk);
-    }
-    spec.working_dir = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_else(|_| ".".into());
+    spec.env_vars.insert("PYTHONPATH".into(), sentinel_core::sdk::python_path(&root).map_err(io)?);
+    spec.working_dir = root.display().to_string();
 
     state
         .supervisor

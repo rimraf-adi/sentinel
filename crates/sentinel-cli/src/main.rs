@@ -25,10 +25,13 @@ enum Commands {
         #[arg(short, long, default_value = "2512")]
         port: u16,
     },
-    /// Run a training job from a component or config
+    /// Train a graph component in the foreground (component id or path to a component YAML)
     Run {
-        /// Path to config or component
-        config: String,
+        /// Component id (see `sentinel component list`) or a .yaml file
+        component: String,
+        /// Hyperparameter override, repeatable: --set lr=0.001
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
     },
     /// Launch hyperparameter sweep
     Sweep {
@@ -110,8 +113,22 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Dev { port }) => {
             run_dev(port).await?;
         }
-        Some(Commands::Run { config }) => {
-            println!("Launching Sentinel run with config: {config}");
+        Some(Commands::Run { component, set }) => {
+            let g = build_graph(&component, &set)?;
+            let code = sentinel_core::codegen::generate_training_script(&g, &component)?;
+            let root = std::env::current_dir()?;
+            let script = sentinel_core::sdk::write_generated_script(&root, &component, &uuid::Uuid::new_v4().simple().to_string()[..8], &code)?;
+            println!("Running {component}  (script: {})", script.display());
+            let python = if cfg!(windows) { "python" } else { "python3" };
+            let status = tokio::process::Command::new(python)
+                .arg(&script)
+                .env("PYTHONPATH", sentinel_core::sdk::python_path(&root)?)
+                .status()
+                .await
+                .map_err(|e| anyhow::anyhow!("could not start {python}: {e}"))?;
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
         }
         Some(Commands::Sweep { config }) => {
             println!("🚀 Launching Sentinel Hyperparameter Sweep with config: {config}");
@@ -314,9 +331,15 @@ async fn main() -> anyhow::Result<()> {
 fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::graph::ValidatedGraph> {
     let mut registry = ComponentRegistry::new();
     let _ = registry.load_from_dir(Path::new("components"));
-    let c = registry
-        .get(component)
-        .ok_or_else(|| anyhow::anyhow!("Component '{component}' not found (see `sentinel component list`)"))?;
+    let from_file;
+    let c = if component.ends_with(".yaml") || component.ends_with(".yml") {
+        from_file = Component::from_yaml(&std::fs::read_to_string(component)?)?;
+        &from_file
+    } else {
+        registry
+            .get(component)
+            .ok_or_else(|| anyhow::anyhow!("Component '{component}' not found (see `sentinel component list`)"))?
+    };
     let mut overrides = HashMap::new();
     for kv in set {
         let (k, v) = kv
@@ -329,7 +352,13 @@ fn build_graph(component: &str, set: &[String]) -> anyhow::Result<sentinel_core:
 }
 
 async fn run_dev(port: u16) -> anyhow::Result<()> {
-    let supervisor = sentinel_daemon::supervisor::ProcessSupervisor::new();
+    let supervisor = match sentinel_daemon::store::JobStore::open(".sentinel/jobs") {
+        Ok(store) => sentinel_daemon::supervisor::ProcessSupervisor::with_store(store),
+        Err(e) => {
+            eprintln!("warning: job history will not be saved ({e})");
+            sentinel_daemon::supervisor::ProcessSupervisor::new()
+        }
+    };
     let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(4);
     let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(
         sentinel_daemon::scheduler::HardwareMonitor::new(),

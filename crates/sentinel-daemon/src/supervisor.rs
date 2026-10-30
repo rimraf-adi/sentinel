@@ -4,6 +4,7 @@ use sentinel_core::models::{JobRecord, JobSpec, JobStatus};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
+use crate::store::JobStore;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -29,13 +30,25 @@ struct ActiveJob {
 #[derive(Clone, Default)]
 pub struct ProcessSupervisor {
     jobs: Arc<RwLock<HashMap<Uuid, ActiveJob>>>,
+    store: Option<Arc<JobStore>>,
 }
 
 impl ProcessSupervisor {
     pub fn new() -> Self {
         Self {
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            store: None,
         }
+    }
+
+    /// A supervisor whose job history is kept on disk and restored on start.
+    pub fn with_store(store: JobStore) -> Self {
+        let jobs = store
+            .load_all()
+            .into_iter()
+            .map(|(record, logs)| (record.spec.id, ActiveJob { record, logs, child_id: None }))
+            .collect();
+        Self { jobs: Arc::new(RwLock::new(jobs)), store: Some(Arc::new(store)) }
     }
 
     /// Launch a new job asynchronously.
@@ -87,10 +100,14 @@ impl ProcessSupervisor {
         };
 
         self.jobs.write().await.insert(job_id, active_job);
+        if let Some(s) = &self.store {
+            s.save(&record);
+        }
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let jobs_ref = self.jobs.clone();
+        let store = self.store.clone();
 
         // Spawn background task to stream logs and wait for process completion
         tokio::spawn(async move {
@@ -110,7 +127,7 @@ impl ProcessSupervisor {
                             Some(text) => {
                                 let mut lock = jobs_ref.write().await;
                                 if let Some(job) = lock.get_mut(&job_id) {
-                                    job.logs.push(format!("[stdout] {text}"));
+                                    { let l = format!("[stdout] {text}"); if let Some(s) = &store { s.append_log(job_id, &l); } job.logs.push(l); }
                                 }
                             }
                             None => stdout_lines = None,
@@ -127,7 +144,7 @@ impl ProcessSupervisor {
                             Some(text) => {
                                 let mut lock = jobs_ref.write().await;
                                 if let Some(job) = lock.get_mut(&job_id) {
-                                    job.logs.push(format!("[stderr] {text}"));
+                                    { let l = format!("[stderr] {text}"); if let Some(s) = &store { s.append_log(job_id, &l); } job.logs.push(l); }
                                 }
                             }
                             None => stderr_lines = None,
@@ -142,7 +159,7 @@ impl ProcessSupervisor {
                         } {
                             let mut lock = jobs_ref.write().await;
                             if let Some(job) = lock.get_mut(&job_id) {
-                                job.logs.push(format!("[stdout] {line}"));
+                                { let l = format!("[stdout] {line}"); if let Some(s) = &store { s.append_log(job_id, &l); } job.logs.push(l); }
                             }
                         }
 
@@ -153,28 +170,33 @@ impl ProcessSupervisor {
                         } {
                             let mut lock = jobs_ref.write().await;
                             if let Some(job) = lock.get_mut(&job_id) {
-                                job.logs.push(format!("[stderr] {line}"));
+                                { let l = format!("[stderr] {line}"); if let Some(s) = &store { s.append_log(job_id, &l); } job.logs.push(l); }
                             }
                         }
 
                         let mut lock = jobs_ref.write().await;
                         if let Some(job) = lock.get_mut(&job_id) {
+                            // A job the user stopped stays Cancelled; its SIGTERM exit is not a failure.
+                            let cancelled = job.record.status == JobStatus::Cancelled;
                             job.record.finished_at = Some(chrono::Utc::now());
                             match status {
                                 Ok(exit_status) => {
                                     job.record.exit_code = exit_status.code();
-                                    if exit_status.success() {
+                                    if cancelled {
+                                    } else if exit_status.success() {
                                         job.record.status = JobStatus::Completed;
                                     } else {
                                         job.record.status = JobStatus::Failed;
                                         job.record.error_message = Some(format!("Process exited with status: {exit_status}"));
                                     }
                                 }
-                                Err(err) => {
+                                Err(err) if !cancelled => {
                                     job.record.status = JobStatus::Failed;
                                     job.record.error_message = Some(err.to_string());
                                 }
+                                Err(_) => {}
                             }
+                            if let Some(s) = &store { s.save(&job.record); }
                         }
                         break;
                     }
@@ -187,11 +209,14 @@ impl ProcessSupervisor {
                         if let Some(job) = lock.get_mut(&job_id) {
                             job.record.finished_at = Some(chrono::Utc::now());
                             job.record.exit_code = exit_status.code();
-                            job.record.status = if exit_status.success() {
-                                JobStatus::Completed
-                            } else {
-                                JobStatus::Failed
-                            };
+                            if job.record.status != JobStatus::Cancelled {
+                                job.record.status = if exit_status.success() {
+                                    JobStatus::Completed
+                                } else {
+                                    JobStatus::Failed
+                                };
+                            }
+                            if let Some(s) = &store { s.save(&job.record); }
                         }
                     }
                     break;
@@ -214,6 +239,9 @@ impl ProcessSupervisor {
             }
             job.record.status = JobStatus::Cancelled;
             job.record.finished_at = Some(chrono::Utc::now());
+            if let Some(s) = &self.store {
+                s.save(&job.record);
+            }
         }
 
         Ok(())
@@ -281,5 +309,57 @@ mod tests {
 
         let stopped = supervisor.get_job(job_id).await.expect("find job");
         assert_eq!(stopped.status, JobStatus::Cancelled);
+    }
+
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("sentinel-jobs-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        p
+    }
+
+    #[tokio::test]
+    async fn test_history_survives_restart() {
+        let dir = tmp("restart");
+        let first = ProcessSupervisor::with_store(JobStore::open(&dir).unwrap());
+        let spec = JobSpec::new("keep-me", RunMode::Command).with_command("echo persisted line");
+        let id = spec.id;
+        first.start_job(spec).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        drop(first);
+
+        let second = ProcessSupervisor::with_store(JobStore::open(&dir).unwrap());
+        let rec = second.get_job(id).await.expect("job restored");
+        assert_eq!(rec.status, JobStatus::Completed);
+        assert!(second.get_logs(id).await.iter().any(|l| l.contains("persisted line")));
+    }
+
+    #[tokio::test]
+    async fn test_running_jobs_become_failed_after_restart() {
+        let dir = tmp("orphan");
+        let first = ProcessSupervisor::with_store(JobStore::open(&dir).unwrap());
+        let spec = JobSpec::new("orphan", RunMode::Command).with_command("sleep 30");
+        let id = spec.id;
+        first.start_job(spec).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let pid = first.get_job(id).await.unwrap().pid.unwrap();
+        drop(first); // simulate the daemon dying; the record on disk still says running
+
+        let second = ProcessSupervisor::with_store(JobStore::open(&dir).unwrap());
+        let rec = second.get_job(id).await.unwrap();
+        assert_eq!(rec.status, JobStatus::Failed);
+        assert!(rec.error_message.unwrap().contains("restarted"));
+        unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+    }
+
+    #[tokio::test]
+    async fn test_stopped_job_stays_cancelled_after_process_exits() {
+        let supervisor = ProcessSupervisor::new();
+        let spec = JobSpec::new("stop-me", RunMode::Command).with_command("sleep 10");
+        let id = spec.id;
+        supervisor.start_job(spec).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        supervisor.stop_job(id).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await; // let the monitor task observe the exit
+        assert_eq!(supervisor.get_job(id).await.unwrap().status, JobStatus::Cancelled);
     }
 }
