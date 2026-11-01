@@ -1,5 +1,5 @@
 /** Tiny area chart for stat cards. Purely decorative: the number beside it carries the information. */
-export function Sparkline({ values, color = '#7c5cff', max }: { values: number[]; color?: string; max?: number }) {
+export function Sparkline({ values, color = '#5b9bff', max }: { values: number[]; color?: string; max?: number }) {
   if (values.length < 2) return <div className="skeleton" style={{ height: 34, marginTop: 8 }} aria-hidden />;
   const W = 200, H = 34;
   const hi = max ?? Math.max(...values, 1e-9), lo = max !== undefined ? 0 : Math.min(...values);

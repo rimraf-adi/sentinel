@@ -5,7 +5,7 @@ import { Icon } from '../icons';
 import { LineChart, type Series } from '../LineChart';
 import { EmptyState, useToast } from '../ui';
 
-const COLORS = ['#60a5fa', '#f59e0b', '#4ade80', '#f472b6', '#a78bfa', '#fb7185', '#2dd4bf', '#facc15'];
+const COLORS = ['#60a5fa', '#f59e0b', '#4ade80', '#f472b6', '#c4a7e7', '#fb7185', '#2dd4bf', '#facc15'];
 const fmtNum = (v: number | undefined) => (v === undefined ? '—' : Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(2) : (+v.toPrecision(4)).toString());
 const when = (ms: number | null) => (ms ? new Date(ms).toLocaleString() : '—');
 const dur = (r: TrackedRun) => (r.start_time && r.end_time ? `${((r.end_time - r.start_time) / 1000).toFixed(1)}s` : '—');
@@ -21,7 +21,7 @@ function Scatter({ result }: { result: GenerateResult }) {
     const W = 300, H = 220, m = 28, sx = (v: number) => m + ((v - x0) / Math.max(1e-9, x1 - x0)) * (W - 2 * m), sy = (v: number) => H - m - ((v - y0) / Math.max(1e-9, y1 - y0)) * (H - 2 * m);
     return (
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${rows.length} generated samples`} style={{ maxWidth: 360, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }}>
-        {rows.map((r, i) => <circle key={i} cx={sx(r[0])} cy={sy(r[1])} r="2.2" fill="#7c5cff" fillOpacity=".6" />)}
+        {rows.map((r, i) => <circle key={i} cx={sx(r[0])} cy={sy(r[1])} r="2.2" fill="#5b9bff" fillOpacity=".6" />)}
         <text x={W / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#8c8c99">{result.features[0]} ({x0.toFixed(1)} … {x1.toFixed(1)})</text>
         <text x={8} y={H / 2} fontSize="10" fill="#8c8c99" transform={`rotate(-90 8 ${H / 2})`} textAnchor="middle">{result.features[1]} ({y0.toFixed(1)} … {y1.toFixed(1)})</text>
       </svg>
@@ -59,7 +59,7 @@ function ModelPanel({ run }: { run: TrackedRun }) {
       <div className="row sp"><b>Model · {run.run_name} <span className="mono" style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{run.run_id.slice(0, 8)}</span></b>
         {meta && <span className="tag">{meta.task}</span>}</div>
       {!meta ? <p className="hint" style={{ marginTop: 8 }}>This run exported no model. Train a graph component (Components or Builder) to get weights, TorchScript and ONNX.</p> : (
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', marginTop: 12 }}>
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', marginTop: 12 }}>
           <div>
             <div className="stat-title">Exports</div>
             <div className="chips" style={{ margin: '8px 0' }}>

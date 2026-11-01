@@ -12,7 +12,7 @@ import { Inspector } from './Inspector';
 import { SaveModal } from './SaveModal';
 import type { BNode, Graph } from './types';
 
-const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#a78bfa', vision: '#f472b6', generative: '#fb923c', graph: '#22d3ee' };
+const FAM_COLOR: Record<string, string> = { core: '#94a3b8', shape: '#2dd4bf', sequence: '#fbbf24', attention: '#c4a7e7', vision: '#f0a0c0', generative: '#fb923c', graph: '#67d4e8' };
 const famColor = (f?: string) => (f && FAM_COLOR[f]) || '#94a3b8';
 const nodeTypes = { block: BlockNodeView, input: InputNodeView, output: OutputNodeView };
 const FAMILY_ORDER = ['core', 'shape', 'sequence', 'attention', 'vision', 'generative', 'graph'];
@@ -325,13 +325,11 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
           >
             <Background variant={BackgroundVariant.Dots} gap={22} color="#222" />
             <Controls showInteractive={false} />
-            <MiniMap pannable zoomable maskColor="rgba(0,0,0,.6)" nodeColor={(n) => (n.type === 'block' ? famColor(blocks[(n.data as { block: string }).block]?.family) : '#555')} />
+            {g.nodes.some((n) => n.type === 'block') && <MiniMap pannable zoomable maskColor="rgba(0,0,0,.6)" nodeColor={(n) => (n.type === 'block' ? famColor(blocks[(n.data as { block: string }).block]?.family) : '#555')} />}
             {!g.nodes.some((n) => n.type === 'block') && (
-              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none', zIndex: 4 }}>
-                <div className="empty-state" style={{ maxWidth: 340 }}>
-                  <div className="ico"><Icon name="builder" size={20} /></div>
-                  <b>Start your graph</b>Drag a block from the left (or double-click it), then wire output ports to input ports.
-                </div>
+              <div className="bd-hint">
+                <Icon name="builder" size={16} />
+                <span><b>Start your graph.</b> Drag a block from the left (or double-click it), then wire output ports to input ports.</span>
               </div>
             )}
           </ReactFlow>

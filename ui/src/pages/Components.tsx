@@ -68,7 +68,7 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
   );
 }
 
-const DOMAIN_COLOR: Record<string, string> = { tabular: '#7c5cff', sequence: '#fbbf24', vision: '#f472b6', graph: '#22d3ee', llm: '#34d399', custom: '#94a3b8' };
+const DOMAIN_COLOR: Record<string, string> = { tabular: '#5b9bff', sequence: '#fbbf24', vision: '#f472b6', graph: '#22d3ee', llm: '#34d399', custom: '#94a3b8' };
 const colorOf = (d: string) => DOMAIN_COLOR[d] ?? '#94a3b8';
 
 export function Components({ refresh, go, openInBuilder }: { refresh: () => void; go: (t: string) => void; openInBuilder: (id: string) => void }) {

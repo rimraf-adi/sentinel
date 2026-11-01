@@ -1,14 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Sentinel">
-  <defs>
-    <linearGradient id="g" x1="3" y1="2" x2="29" y2="30" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#7c5cff"/>
-      <stop offset=".55" stop-color="#4f8cff"/>
-      <stop offset="1" stop-color="#22d3ee"/>
-    </linearGradient>
-  </defs>
-  <rect width="32" height="32" rx="9" fill="url(#g)"/>
+  <rect width="32" height="32" rx="8" fill="#ececee"/>
   <!-- two graph nodes joined by an S-shaped edge -->
-  <path d="M21.5 10.2C13.2 10.2 13.2 16 16 16s2.8 5.8-5.5 5.8" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
-  <circle cx="21.5" cy="10.2" r="3" fill="#fff"/>
-  <circle cx="10.5" cy="21.8" r="3" fill="#fff"/>
+  <path d="M21.5 10.2C13.2 10.2 13.2 16 16 16s2.8 5.8-5.5 5.8" fill="none" stroke="#0b0b0c" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="21.5" cy="10.2" r="3" fill="#0b0b0c"/>
+  <circle cx="10.5" cy="21.8" r="3" fill="#0b0b0c"/>
 </svg>

@@ -106,7 +106,7 @@ export function System({ hw }: { hw: Vitals | null }) {
             <div key={i}><div className="stat-foot">core {i}{hw.cpu_freq_mhz[i] ? ` · ${hw.cpu_freq_mhz[i]} MHz` : ''}</div><Bar value={c} /><div className="mono" style={{ fontSize: 11 }}>{c.toFixed(0)}%</div></div>
           ))}</div></div>
 
-          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', marginTop: 14 }}>
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))', marginTop: 14 }}>
             <div className="card" style={{ padding: 0 }}>
               <div className="card-h">Disks</div>
               <table><thead><tr><th>Mount</th><th>Type</th><th>Used</th><th /></tr></thead><tbody>

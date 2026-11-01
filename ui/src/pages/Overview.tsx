@@ -61,7 +61,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
           <Sparkline values={pts.map((p) => p.cpu)} max={100} color="#60a5fa" /></div>
         <div className="card hover"><div className="stat-title">Memory</div>
           {hw ? <div className="stat-value">{fmtGB(hw.ram_used_bytes)} <small>/ {fmtGB(hw.ram_total_bytes)} GB</small></div> : <Skeleton h={30} w={120} style={{ margin: '4px 0' }} />}
-          <Sparkline values={pts.map((p) => (p.ram_used / p.ram_total) * 100)} max={100} color={ramPct > 85 ? '#fbbf24' : '#7c5cff'} /></div>
+          <Sparkline values={pts.map((p) => (p.ram_used / p.ram_total) * 100)} max={100} color={ramPct > 85 ? '#fbbf24' : '#5b9bff'} /></div>
         <div className="card hover"><div className="stat-title">Network</div>
           {hw ? <div className="stat-value" style={{ fontSize: 20 }}>↓ {rate(hw.network.reduce((a, n) => a + n.rx_bps, 0))}</div> : <Skeleton h={30} w={120} style={{ margin: '4px 0' }} />}
           <Sparkline values={pts.map((p) => p.net_rx)} color="#34d399" /></div>
@@ -70,7 +70,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
           {gpu ? <Sparkline values={pts.map((p) => p.gpus[0]?.util ?? 0)} max={100} color="#f472b6" /> : <div className="stat-foot" style={{ marginTop: 8 }}>{hw?.gpus.length ? 'live metrics unavailable on this GPU' : 'training runs on the CPU'}</div>}</div>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', marginTop: 16 }}>
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', marginTop: 16 }}>
         <div className="card" style={{ padding: 0 }}>
           <div className="row sp" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}><b>Latest experiments</b><button className="btn sm" onClick={() => go('experiments')}>Compare →</button></div>
           {!exps.data ? <div style={{ padding: 16 }}><Skeleton h={14} style={{ marginBottom: 12 }} /><Skeleton h={14} w="80%" /></div>

@@ -67,7 +67,7 @@ export function App() {
       <a className="skip" href="#main">Skip to content</a>
       <div className="app">
         <aside className="sidebar">
-          <div className="brand"><Logo size={28} /><div><b>sentinel</b><small>TRAINING CONTROL</small></div></div>
+          <div className="brand"><Logo size={28} /><div className="brand-text"><b>sentinel</b><small>TRAINING CONTROL</small></div></div>
           <div className="ws-card">
             <b>{name}</b>
             <span className="mono">{r?.workspace_path ?? '…'}</span>
@@ -81,9 +81,9 @@ export function App() {
               <div key={g} style={{ marginBottom: 14 }}>
                 <div className="nav-title">{g}</div>
                 {TABS.filter((t) => t.group === g).map((t) => (
-                  <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} aria-current={t.id === tab ? 'page' : undefined} onClick={() => go(t.id)}>
+                  <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} aria-current={t.id === tab ? 'page' : undefined} onClick={() => go(t.id)} title={t.label}>
                     <Icon name={t.id as IconName} />
-                    {t.label}
+                    <span className="nav-label">{t.label}</span>
                     {t.id === 'runs' && running > 0 && <span className="badge" aria-label={`${running} running`}>{running}</span>}
                     {t.id === 'datasets' && <span className="badge">{datasets.data?.length ?? 0}</span>}
                   </button>
