@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "vision/image-classification@v1"
-name: "Vision Classification"
+name: "Image Classifier (AMP + Cosine)"
 description: "PyTorch image classification with AMP, AdamW, and Cosine Annealing"
 domain: "vision"
 defaults:

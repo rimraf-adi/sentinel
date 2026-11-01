@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "generative/gan@v1"
-name: "GAN"
+name: "Tabular GAN"
 description: "Generative adversarial network for tabular data: a generator and a discriminator, both built from the compound mlp_block, trained against each other with two optimizers"
 domain: "generative"
 parameters:

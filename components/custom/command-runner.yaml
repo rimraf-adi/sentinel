@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "custom/command-runner@v1"
-name: "Custom Command Runner"
+name: "Command Adapter (Run Any Script)"
 description: "Zero-touch adapter wrapping existing python training commands"
 domain: "custom"
 defaults: []

@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "llm/lora-finetune@v1"
-name: "LLM LoRA Fine-Tuning"
+name: "LoRA Fine-Tune (LLM)"
 description: "Parameter-efficient fine-tuning with PEFT LoRA and bfloat16"
 domain: "llm"
 defaults:

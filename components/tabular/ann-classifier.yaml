@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "tabular/ann-classifier@v1"
-name: "ANN Classifier"
+name: "Feed-forward Classifier (Tabular)"
 description: "Fully connected network (linear + relu blocks) for tabular classification"
 domain: "tabular"
 parameters:

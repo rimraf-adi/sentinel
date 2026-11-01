@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "generative/vae@v1"
-name: "Variational Autoencoder"
+name: "Tabular VAE"
 description: "Learns to reconstruct tabular data through a small latent space. Uses the vae_encoder and vae_decoder compounds and the sampling block; trains with reconstruction + beta * KL"
 domain: "generative"
 parameters:

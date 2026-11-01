@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "tabular/deep-residual-mlp@v1"
-name: "Deep Residual MLP"
+name: "Residual MLP (Stacked Blocks)"
 description: "A stem, three residual_mlp_block compounds and a head: the block hierarchy in one model (fundamental, then compound, then model)"
 domain: "tabular"
 parameters:

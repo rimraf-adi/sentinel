@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "tabular/residual-mlp@v1"
-name: "Residual MLP"
+name: "Residual MLP (Skip Connection)"
 description: "MLP with a skip connection (add block) - the smallest real DAG"
 domain: "tabular"
 parameters:

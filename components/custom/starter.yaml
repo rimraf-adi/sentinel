@@ -1,6 +1,6 @@
 schema_version: "1.0"
 component_id: "custom/starter@v1"
-name: "Custom Component Starter"
+name: "Blank Starter (Custom Recipe)"
 description: "Starter component for user-defined training recipes"
 domain: "custom"
 defaults:

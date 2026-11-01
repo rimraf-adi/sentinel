@@ -291,7 +291,7 @@ impl ComponentRegistry {
         let vision_yaml = r#"
 schema_version: "1.0"
 component_id: "vision/image-classification@v1"
-name: "Vision Classification"
+name: "Image Classifier (AMP + Cosine)"
 description: "Image classification with ResNet/ViT, AMP, and cosine scheduling"
 domain: "vision"
 defaults:
@@ -345,7 +345,7 @@ smoke_test:
         let custom_runner_yaml = r#"
 schema_version: "1.0"
 component_id: "custom/command-runner@v1"
-name: "Custom Command Runner"
+name: "Command Adapter (Run Any Script)"
 description: "Zero-touch adapter for existing scripts like 'python train.py'"
 domain: "custom"
 defaults: []
