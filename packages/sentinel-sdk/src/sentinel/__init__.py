@@ -401,4 +401,7 @@ try:
 except ImportError:
     pass
 
+from . import hooks
+
+
 

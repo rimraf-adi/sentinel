@@ -682,6 +682,29 @@ async fn main() -> anyhow::Result<()> {
                         } else { None }
                     } else { None };
 
+                    let safe_hook_name = name.replace('-', "_");
+                    let hook_candidates = [
+                        format!("{}/integrations/{name}/hook.py", proto.space),
+                        format!("{}/integrations/{safe_hook_name}/hook.py", proto.space),
+                    ];
+                    let mut downloaded_hook: Option<std::path::PathBuf> = None;
+                    for h_url in &hook_candidates {
+                        let h_out = std::process::Command::new("curl")
+                            .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", h_url])
+                            .output();
+                        if let Ok(ho) = h_out {
+                            if ho.status.success() && !ho.stdout.is_empty() && !ho.stdout.starts_with(b"404:") {
+                                let hook_dir = cwd.join(".sentinel").join("integrations").join(&name);
+                                let _ = std::fs::create_dir_all(&hook_dir);
+                                let hook_path = hook_dir.join("hook.py");
+                                if std::fs::write(&hook_path, &ho.stdout).is_ok() {
+                                    downloaded_hook = Some(hook_path);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     proto.add_integration(sentinel_core::protocol::IntegrationSpec {
                         name: name.clone(),
                         version: "1.0.0".to_string(),
@@ -694,6 +717,9 @@ async fn main() -> anyhow::Result<()> {
                     println!("✨ Successfully integrated '{name}'!");
                     println!("   Protocol:    {}", dest.display());
                     println!("   Space:       {}", proto.space);
+                    if let Some(ref hp) = downloaded_hook {
+                        println!("   Hook:        {} (active in sentinel-sdk)", hp.display());
+                    }
                     println!("   Dashboard:   Active on http://localhost:2512");
                 }
                 IntegrateCommands::Remove { name } => {

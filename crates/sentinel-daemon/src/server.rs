@@ -1233,6 +1233,26 @@ async fn toggle_integration_handler(Json(req): Json<ToggleIntegrationReq>) -> Re
 async fn add_integration_handler(Json(req): Json<AddIntegrationReq>) -> Result<Json<serde_json::Value>, ApiError> {
     let root = std::env::current_dir().unwrap_or_default();
     let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&root);
+
+    let safe_hook_name = req.name.replace('-', "_");
+    let hook_candidates = [
+        format!("{}/integrations/{}/hook.py", proto.space, req.name),
+        format!("{}/integrations/{safe_hook_name}/hook.py", proto.space),
+    ];
+    for h_url in &hook_candidates {
+        let h_out = std::process::Command::new("curl")
+            .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", h_url])
+            .output();
+        if let Ok(ho) = h_out {
+            if ho.status.success() && !ho.stdout.is_empty() && !ho.stdout.starts_with(b"404:") {
+                let hook_dir = root.join(".sentinel").join("integrations").join(&req.name);
+                let _ = std::fs::create_dir_all(&hook_dir);
+                let _ = std::fs::write(hook_dir.join("hook.py"), &ho.stdout);
+                break;
+            }
+        }
+    }
+
     proto.add_integration(sentinel_core::protocol::IntegrationSpec {
         name: req.name.clone(),
         version: req.version.unwrap_or_else(|| "1.0.0".to_string()),
