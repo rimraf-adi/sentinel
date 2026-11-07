@@ -8,13 +8,52 @@ use sentinel_core::components::{Component, ComponentRegistry};
 use std::collections::HashMap;
 use std::path::Path;
 
+const HELP_AFTER: &str = "\
+WORKFLOW & QUICKSTART:
+  1. Initialize & Verify Project
+     $ sentinel init                        # convert current folder into a Sentinel repository
+     $ sentinel new my-project              # or scaffold a new project with batteries included
+     $ sentinel doctor                      # verify Python, PyTorch, CUDA/MPS & project health
+     $ sentinel dev                         # launch supervisor & web dashboard (http://localhost:2512)
+
+  2. Add & Inspect Model Architectures
+     $ sentinel add vit-tiny                # install vision transformer from Sentinel Hub
+     $ sentinel component list              # list all available built-in, user & project components
+     $ sentinel component show vision/vit-tiny@v1  # inspect DAG graph, shapes & parameters
+     $ sentinel component blocks            # list all 72 reusable PyTorch fundamental blocks
+
+  3. Train Workloads with Supervised Telemetry
+     $ sentinel run vision/vit-tiny@v1      # train with pre-flight shape & bounds validation
+     $ sentinel run tabular/residual-mlp@v1 --set lr=0.001 epochs=20  # override parameters
+     $ sentinel top                         # live process, GPU & host memory monitor
+
+  4. Explainability & Analysis
+     $ sentinel explain                     # axiomatic Integrated Gradients & SVD Spectral Rank
+     $ sentinel explain --input \"5.1,3.5,1.4,0.2\" --json
+
+  5. Advanced Workloads & Capability Packs
+     $ sentinel sweep recipes/sweep.yaml    # Optuna ASHA multi-worker hyperparameter sweeps
+     $ sentinel integrate add xai           # add modular capability packs from Sentinel Hub
+     $ sentinel push components/my-net.yaml # publish custom models or blocks to Sentinel Hub
+
+  6. Zero-Lock-In Export
+     $ sentinel export vision/vit-tiny@v1 -o train_standalone.py # export bare standalone script
+     $ sentinel model export <run-id> -f onnx                    # export weights to ONNX
+     $ sentinel model export <run-id> -f torchscript             # export to TorchScript
+
+DOCUMENTATION & REGISTRY:
+  Sentinel Hub:    https://github.com/rimraf-adi/sentinel-hub (or local at http://localhost:3345)
+  Local Guide:     SENTINEL.md (crisp operational reference for developers & coding agents)
+";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "sentinel",
     author,
     version,
-    about = "Sentinel ML Training Supervisor & Framework",
-    long_about = None
+    about = "Sentinel ML Training Supervisor & Operations Plane",
+    long_about = "A lightweight ML training supervisor, DAG model compiler, and telemetry plane for coding agents and ML teams.",
+    after_help = HELP_AFTER
 )]
 struct Cli {
     #[command(subcommand)]
@@ -23,7 +62,26 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Start daemon and launch the low-overhead Web UI
+    // -------------------------------------------------------------------------
+    // 1. Getting Started & Setup
+    // -------------------------------------------------------------------------
+    /// Convert/initialize an existing directory into a Sentinel repository
+    Init {
+        /// Directory path (defaults to current directory ".")
+        #[arg(default_value = ".")]
+        path: String,
+    },
+    /// Initialize a new Sentinel project directory with standard structure
+    New {
+        /// Project name
+        name: String,
+    },
+    /// Check Python, PyTorch, GPU drivers (NVML), ports and project setup
+    Doctor {
+        #[arg(short, long, default_value = "2512")]
+        port: u16,
+    },
+    /// Start the background supervisor daemon and low-overhead Web dashboard
     Dev {
         #[arg(short, long, default_value = "2512")]
         port: u16,
@@ -31,20 +89,23 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
     },
-    /// Train a graph component in the foreground (component id or path to a component YAML)
-    Run {
-        /// Component id (see `sentinel component list`) or a .yaml file
-        component: String,
-        /// Hyperparameter override, repeatable: --set lr=0.001
-        #[arg(long = "set", value_name = "KEY=VALUE")]
-        set: Vec<String>,
+
+    // -------------------------------------------------------------------------
+    // 2. Modular Blocks & Architectures
+    // -------------------------------------------------------------------------
+    /// Add/install a modular neural block or template (e.g. `sentinel add vit-tiny`)
+    Add {
+        /// Module name to install (positional)
+        #[arg(value_name = "MODULE")]
+        module: Option<String>,
+        /// Module name via flag
+        #[arg(long = "module")]
+        module_flag: Option<String>,
+        /// Install globally into ~/.sentinel/templates/
+        #[arg(long)]
+        global: bool,
     },
-    /// Launch hyperparameter sweep
-    Sweep {
-        /// Path to sweep config
-        config: String,
-    },
-    /// Component commands (list, new, check, save-run)
+    /// Component commands (list, show, blocks, new, check, save-run)
     Component {
         #[command(subcommand)]
         command: ComponentCommands,
@@ -54,15 +115,27 @@ enum Commands {
         #[command(subcommand)]
         command: TemplateCommands,
     },
-    /// Export run as standalone pure bare PyTorch script
-    Export {
-        #[arg(default_value = "script")]
-        format: String,
-        #[arg(short, long, default_value = "vision/image-classification@v1")]
+
+    // -------------------------------------------------------------------------
+    // 3. Training & Workloads
+    // -------------------------------------------------------------------------
+    /// Train a graph component in the foreground with automatic GPU allocation & shape validation
+    Run {
+        /// Component id (see `sentinel component list`) or a .yaml file
         component: String,
-        #[arg(short, long, default_value = "train_standalone.py")]
-        output: String,
+        /// Hyperparameter override, repeatable: --set lr=0.001
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
     },
+    /// Launch multi-worker Optuna ASHA hyperparameter sweep
+    Sweep {
+        /// Path to sweep config
+        config: String,
+    },
+
+    // -------------------------------------------------------------------------
+    // 4. Observability, Inference & Export
+    // -------------------------------------------------------------------------
     /// Explain model decision using axiomatic Integrated Gradients & SVD Spectral Rank
     Explain {
         /// Run id (defaults to most recent run with an exported model)
@@ -74,17 +147,28 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Add/install a modular neural block or template (e.g. `sentinel add vit-tiny` or `sentinel add --module vit-tiny`)
-    Add {
-        /// Module name to install (positional)
-        #[arg(value_name = "MODULE")]
-        module: Option<String>,
-        /// Module name via flag
-        #[arg(long = "module")]
-        module_flag: Option<String>,
-        /// Install globally into ~/.sentinel/templates/
-        #[arg(long)]
-        global: bool,
+    /// Use trained models: list exports, predict on new data, copy weights/TorchScript/ONNX out
+    Model {
+        #[command(subcommand)]
+        command: ModelCommands,
+    },
+    /// Export run as standalone pure bare PyTorch script with ZERO Sentinel dependency
+    Export {
+        #[arg(default_value = "script")]
+        format: String,
+        #[arg(short, long, default_value = "vision/image-classification@v1")]
+        component: String,
+        #[arg(short, long, default_value = "train_standalone.py")]
+        output: String,
+    },
+
+    // -------------------------------------------------------------------------
+    // 5. Capability Packs, Registry & Publishing
+    // -------------------------------------------------------------------------
+    /// Manage modular capability integrations from sentinel-hub (e.g. `sentinel integrate add xai`)
+    Integrate {
+        #[command(subcommand)]
+        command: Option<IntegrateCommands>,
     },
     /// Push a component or integration module directly to sentinel-hub (e.g. `sentinel push components/unet.yaml`)
     Push {
@@ -105,11 +189,15 @@ enum Commands {
         #[arg(long = "hub-dir")]
         hub_dir: Option<String>,
     },
-    /// Use trained models: list exports, predict on new data, copy weights/TorchScript/ONNX out
-    Model {
+    /// Manage project protocol and space configuration (e.g. `sentinel config set space <url>`)
+    Config {
         #[command(subcommand)]
-        command: ModelCommands,
+        command: ConfigCommands,
     },
+
+    // -------------------------------------------------------------------------
+    // 6. Hardware & Telemetry
+    // -------------------------------------------------------------------------
     /// One-shot system vitals: CPU, memory, swap, load, GPUs, and the daemon's jobs
     Status {
         /// Machine-readable output
@@ -118,7 +206,7 @@ enum Commands {
         #[arg(short, long, default_value = "2512")]
         port: u16,
     },
-    /// Live vitals, refreshed in place (uses the daemon's per-job view when it is running)
+    /// Live vitals, refreshed in place (uses the daemon's per-job telemetry)
     Top {
         /// Seconds between refreshes
         #[arg(short, long, default_value = "1")]
@@ -129,36 +217,10 @@ enum Commands {
         #[arg(long, default_value = "8")]
         procs: usize,
     },
-    /// List GPUs with live utilization, memory, temperature and power (nvidia-smi on NVIDIA machines)
+    /// List GPUs with live utilization, memory, temperature and power (nvidia-smi / NVML)
     Gpus {
         #[arg(long)]
         json: bool,
-    },
-    /// Check Python, PyTorch, GPU drivers, ports and project setup, with fixes for this OS
-    Doctor {
-        #[arg(short, long, default_value = "2512")]
-        port: u16,
-    },
-    /// Initialize a new Sentinel project
-    New {
-        /// Project name
-        name: String,
-    },
-    /// Convert/initialize an existing directory into a Sentinel repository
-    Init {
-        /// Directory path (defaults to current directory ".")
-        #[arg(default_value = ".")]
-        path: String,
-    },
-    /// Manage modular capability integrations from sentinel-hub (e.g. `sentinel integrate add xai`)
-    Integrate {
-        #[command(subcommand)]
-        command: Option<IntegrateCommands>,
-    },
-    /// Manage project protocol and space configuration (e.g. `sentinel config set space <url>`)
-    Config {
-        #[command(subcommand)]
-        command: ConfigCommands,
     },
 }
 
