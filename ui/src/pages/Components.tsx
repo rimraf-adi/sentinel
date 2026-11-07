@@ -83,13 +83,13 @@ export function Components({ refresh, go, openInVisualizer }: { refresh: () => v
     <>
       <div className="page-header">
         <div>
-          <div className="eyebrow">COMPONENT REGISTRY</div>
-          <h1 className="page-title">Components</h1>
-          <p className="page-sub">Declarative model architectures and experiment recipes. Inspect live topologies in the DAG Visualizer.</p>
+          <div className="eyebrow">MODEL TEMPLATES</div>
+          <h1 className="page-title">Templates</h1>
+          <p className="page-sub">Declarative model architectures, experiment recipes, and custom templates. Inspect topologies in the DAG Visualizer.</p>
         </div>
       </div>
       <div className="filterbar">
-        <input className="input" type="search" placeholder="Search components…" aria-label="Search components" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input" type="search" placeholder="Search templates…" aria-label="Search templates" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="chips" role="group" aria-label="Filter by domain">
           <button className={'chip' + (domain === null ? ' on' : '')} onClick={() => setDomain(null)}>all</button>
           {domains.map((d) => <button key={d} className={'chip' + (domain === d ? ' on' : '')} onClick={() => setDomain(domain === d ? null : d)}>{d}</button>)}

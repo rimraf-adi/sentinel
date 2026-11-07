@@ -33,7 +33,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
           </div>
           <div className="row">
             <button className="btn" onClick={() => go('runs')}><Icon name="runs" size={14} /> Runs{running.length > 0 && ` · ${running.length} live`}</button>
-            <button className="btn primary" onClick={() => go('components')}><Icon name="components" size={14} /> Components</button>
+            <button className="btn primary" onClick={() => go('components')}><Icon name="components" size={14} /> Templates</button>
           </div>
         </div>
       </section>
@@ -76,7 +76,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
         </div>
         <div className="card" style={{ padding: 0 }}>
           <div className="row sp" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}><b>Recent jobs</b><button className="btn sm" onClick={() => go('runs')}>All runs →</button></div>
-          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a training run from Components, an agent, or the CLI." />
+          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a training run from Templates, an agent, or the CLI." />
             : <table><tbody>{[...jobs].reverse().slice(0, 5).map((j) => (
               <tr key={j.spec.id}><td>{j.spec.name}</td><td><StatusPill status={j.status} /></td><td style={{ color: 'var(--text-muted)' }}>{fmtTime(j.started_at)}</td></tr>))}</tbody></table>}
         </div>

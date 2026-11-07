@@ -15,21 +15,23 @@ import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
 
 const TABS = [
-  { id: 'overview', label: 'Overview', group: 'Workspace' },
-  { id: 'runs', label: 'Runs', group: 'Workspace' },
-  { id: 'experiments', label: 'Experiments', group: 'Workspace' },
-  { id: 'sweeps', label: 'Sweeps', group: 'Workspace' },
-  { id: 'system', label: 'System', group: 'Workspace' },
-  { id: 'components', label: 'Components', group: 'Project' },
-  { id: 'visualizer', label: 'DAG Visualizer', group: 'Project' },
-  { id: 'datasets', label: 'Datasets', group: 'Project' },
+  { id: 'overview', label: 'Overview', group: 'Observability' },
+  { id: 'runs', label: 'Runs', group: 'Observability' },
+  { id: 'experiments', label: 'Experiments', group: 'Observability' },
+  { id: 'sweeps', label: 'Sweeps', group: 'Observability' },
+  { id: 'system', label: 'System', group: 'Observability' },
+  { id: 'components', label: 'Templates', group: 'Templates' },
+  { id: 'visualizer', label: 'DAG Visualizer', group: 'Templates' },
+  { id: 'datasets', label: 'Datasets', group: 'Templates' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
 const parseHash = (): { tab: Tab; component: string | null } => {
   const raw = location.hash.slice(1);
   const [tabPart, compPart] = raw.split(/[:?]/);
-  const t = tabPart === 'builder' ? 'visualizer' : tabPart;
+  let t = tabPart;
+  if (t === 'builder') t = 'visualizer';
+  if (t === 'templates') t = 'components';
   const tab = (TABS.find((x) => x.id === t)?.id ?? 'overview') as Tab;
   let component: string | null = null;
   if (compPart) {
@@ -47,6 +49,7 @@ export function App() {
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
   const datasets = usePoll(api.datasets, 5000);
+  const components = usePoll(api.components, 10000);
   const { hw, online } = useTelemetry();
 
   useEffect(() => {
@@ -83,16 +86,19 @@ export function App() {
       <a className="skip" href="#main">Skip to content</a>
       <div className="app">
         <aside className="sidebar">
-          <div className="brand"><Logo size={28} /><div className="brand-text"><b>sentinel</b><small>TRAINING CONTROL</small></div></div>
+          <div className="brand"><Logo size={28} /><div className="brand-text"><b>sentinel</b><small>OBSERVABILITY &amp; TEMPLATES</small></div></div>
           <div className="ws-card">
-            <b>{name}</b>
-            <span className="mono">{r?.workspace_path ?? '…'}</span>
-            <div className="row" style={{ marginTop: 6 }}>
-              <span className="tag">{r?.git_branch ?? 'main'}</span>
-              <span className="tag">{r ? (r.git_clean ? 'clean' : 'modified') : '…'}</span>
+            <div className="ws-card-header">
+              <span className="ws-name">{name}</span>
+              <span className="ws-agent-tag"><span className="dot ok pulse" />agent active</span>
+            </div>
+            <div className="ws-path mono" title={r?.workspace_path ?? ''}>{r?.workspace_path ?? '…'}</div>
+            <div className="ws-meta">
+              <span className="tag branch"><Icon name="layers" size={11} />{r?.git_branch ?? 'main'}</span>
+              <span className={'tag status ' + (r?.git_clean ? 'clean' : 'modified')}>{r ? (r.git_clean ? 'clean' : 'modified') : '…'}</span>
             </div>
           </div>
-          <nav aria-label="Main">
+          <nav aria-label="Main" style={{ flex: 1 }}>
             {groups.map((g) => (
               <div key={g} style={{ marginBottom: 14 }}>
                 <div className="nav-title">{g}</div>
@@ -100,13 +106,23 @@ export function App() {
                   <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} aria-current={t.id === tab ? 'page' : undefined} onClick={() => go(t.id)} title={t.label}>
                     <Icon name={t.id as IconName} />
                     <span className="nav-label">{t.label}</span>
-                    {t.id === 'runs' && running > 0 && <span className="badge" aria-label={`${running} running`}>{running}</span>}
-                    {t.id === 'datasets' && <span className="badge">{datasets.data?.length ?? 0}</span>}
+                    {t.id === 'runs' && running > 0 && <span className="badge running" aria-label={`${running} running`}><span className="dot ok pulse" />{running}</span>}
+                    {t.id === 'components' && (components.data?.length ?? 0) > 0 && <span className="badge">{components.data?.length}</span>}
+                    {t.id === 'datasets' && (datasets.data?.length ?? 0) > 0 && <span className="badge">{datasets.data?.length}</span>}
                   </button>
                 ))}
               </div>
             ))}
           </nav>
+          <div className="sidebar-footer">
+            <div className="agent-badge-card">
+              <div className="row sp" style={{ marginBottom: 4 }}>
+                <span className="agent-title"><span className="dot ok pulse" />Agent Supervisor</span>
+                <span className="mono agent-port">:2512</span>
+              </div>
+              <p className="agent-desc">Autonomous telemetry plane ready for coding agents.</p>
+            </div>
+          </div>
         </aside>
         <div className="main">
           <header className="topbar">
