@@ -16,6 +16,7 @@ const P: Record<string, string> = {
   bolt: 'M13 2L4 14h7l-1 8 9-12h-7l1-8z',
   chart: 'M3 3v18h18 M7 15l4-5 3 3 5-7',
   flow: 'M2 12h3l3-8 4 16 3-11 3 5 4-2',
+  xai: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   arrow: 'M5 12h14 M13 6l6 6-6 6',
   layers: 'M12 2l10 5-10 5L2 7l10-5z',
 };

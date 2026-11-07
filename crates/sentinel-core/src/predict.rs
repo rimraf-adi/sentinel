@@ -116,6 +116,101 @@ pub fn generate(run_dir: &Path, count: usize, seed: u64) -> Result<Value, String
     run_python(run_dir, GENERATE_PY, &[count.to_string(), seed.to_string()], String::new())
 }
 
+const EXPLAIN_PY: &str = r#"
+import json, pathlib, sys
+import torch
+
+art = pathlib.Path(sys.argv[1])
+meta = json.load(open(art / "meta.json"))
+rows = json.load(sys.stdin)["inputs"]
+feats = meta.get("features", [])
+x = torch.tensor(rows, dtype=torch.float32)
+if "torchscript" not in meta.get("files", {}):
+    raise SystemExit("this run has no TorchScript export")
+model = torch.jit.load(str(art / meta["files"]["torchscript"]))
+model.train(False)
+
+target_sample = x[0:1]
+baseline = torch.zeros_like(target_sample)
+steps = 25
+alphas = torch.linspace(0.0, 1.0, steps)
+interp = torch.cat([baseline + alpha * (target_sample - baseline) for alpha in alphas], dim=0)
+interp.requires_grad_(True)
+out = model(interp)
+
+if out.dim() > 1 and out.shape[-1] > 1:
+    target_cls = int(out[-1].argmax().item())
+    selected = out[:, target_cls].sum()
+else:
+    target_cls = 0
+    selected = out.sum()
+
+grads = torch.autograd.grad(selected, interp)[0]
+avg_grads = grads.mean(dim=0, keepdim=True)
+attributions = ((target_sample - baseline) * avg_grads).detach().squeeze(0).tolist()
+sample_vals = target_sample.squeeze(0).tolist()
+
+if not feats or len(feats) != len(attributions):
+    feats = [f"f_{i}" for i in range(len(attributions))]
+
+total_abs = sum(abs(a) for a in attributions) or 1e-9
+items = []
+for name, val, a in zip(feats, sample_vals, attributions):
+    items.append({
+        "feature": name,
+        "value": round(float(val), 4),
+        "attribution": round(float(a), 5),
+        "importance_pct": round(abs(float(a)) / total_abs * 100.0, 2),
+        "direction": "positive" if a > 0 else "negative" if a < 0 else "neutral"
+    })
+items.sort(key=lambda item: abs(item["attribution"]), reverse=True)
+
+layer_ranks = {}
+for name, param in model.named_parameters():
+    if "weight" in name and param.dim() >= 2:
+        w = param.detach().flatten(start_dim=1)
+        try:
+            _, s, _ = torch.linalg.svd(w.float(), full_matrices=False)
+            tot = s.sum().item()
+            if tot > 1e-9:
+                p = s / tot
+                p = p[p > 1e-12]
+                h = -float((p * torch.log(p)).sum().item())
+                eff = round(float(torch.exp(torch.tensor(h)).item()), 2)
+                max_r = float(min(w.shape))
+                layer_ranks[name] = {"effective_rank": eff, "max_rank": max_r, "collapse_ratio": round(eff / max(max_r, 1.0), 3)}
+        except Exception:
+            pass
+
+res = {
+    "target_class": target_cls,
+    "attributions": items,
+    "top_positive": [item for item in items if item["attribution"] > 0][:5],
+    "top_negative": [item for item in items if item["attribution"] < 0][:5],
+    "spectral_ranks": layer_ranks,
+}
+print(json.dumps(res))
+"#;
+
+/// Explain model decision on sample input using axiomatic Integrated Gradients and Spectral Rank.
+pub fn explain(run_dir: &Path, inputs: &[Vec<f64>]) -> Result<Value, String> {
+    // If an existing explanation artifact is present and no custom inputs given, return it
+    let art_exp = run_dir.join("artifacts").join("xai_explanation.json");
+    if inputs.is_empty() && art_exp.exists() {
+        if let Ok(content) = std::fs::read_to_string(&art_exp) {
+            if let Ok(val) = serde_json::from_str::<Value>(&content) {
+                return Ok(val);
+            }
+        }
+    }
+
+    if inputs.is_empty() {
+        return Err("provide at least one input row for explanation".into());
+    }
+    run_python(run_dir, EXPLAIN_PY, &[], json!({ "inputs": inputs }).to_string())
+}
+
+
 fn run_python(run_dir: &Path, script: &str, extra: &[String], stdin_payload: String) -> Result<Value, String> {
     let art = run_dir.join("artifacts");
     if !art.join("meta.json").exists() {

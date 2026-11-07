@@ -63,6 +63,26 @@ enum Commands {
         #[arg(short, long, default_value = "train_standalone.py")]
         output: String,
     },
+    /// Explain model decision using axiomatic Integrated Gradients & SVD Spectral Rank
+    Explain {
+        /// Run id (defaults to most recent run with an exported model)
+        #[arg(short, long)]
+        run: Option<String>,
+        /// Feature vector: --input "5.1,3.5,1.4,0.2"
+        #[arg(short, long = "input", value_name = "V1,V2,...")]
+        input: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add/install a modular neural block or template (e.g. `sentinel add --module vit-tiny`)
+    Add {
+        /// Module name to install (e.g. vit-tiny, unet, residual-mlp)
+        #[arg(long = "module")]
+        module: String,
+        /// Install globally into ~/.sentinel/templates/
+        #[arg(long)]
+        global: bool,
+    },
     /// Use trained models: list exports, predict on new data, copy weights/TorchScript/ONNX out
     Model {
         #[command(subcommand)]
@@ -209,6 +229,16 @@ enum ModelCommands {
         #[arg(short, long)]
         output: Option<String>,
     },
+    /// Explain model decision using axiomatic Integrated Gradients & SVD Spectral Rank
+    Explain {
+        /// Run id or prefix
+        run: String,
+        /// Feature vector: --input "5.1,3.5,1.4,0.2"
+        #[arg(short, long = "input", value_name = "V1,V2,...")]
+        input: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Rust ignores SIGPIPE, so `println!` panics when stdout is a closed pipe (`sentinel model list | head`). A CLI should
@@ -250,6 +280,63 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Model { command }) => models::run(command)?,
+        Some(Commands::Explain { run, input, json }) => {
+            let run_id = match run {
+                Some(r) => r,
+                None => {
+                    let root = std::env::current_dir().unwrap_or_default().join("mlruns");
+                    sentinel_core::tracking::list_runs(&root)
+                        .into_iter()
+                        .find(|r| {
+                            sentinel_core::tracking::run_dir(&root, &r.run_id)
+                                .map(|d| sentinel_core::predict::read_meta(&d).is_some())
+                                .unwrap_or(false)
+                        })
+                        .map(|r| r.run_id)
+                        .ok_or_else(|| anyhow::anyhow!("no trained run with exported model found (use `sentinel run <component>` first)"))?
+                }
+            };
+            models::run(ModelCommands::Explain { run: run_id, input, json })?;
+        }
+        Some(Commands::Add { module, global }) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let registry = ComponentRegistry::full(&cwd);
+            
+            let matched_id = registry.list().into_iter().find(|c| {
+                c.component_id == module || c.component_id.contains(&module) || c.name.to_lowercase() == module.to_lowercase()
+            }).map(|c| c.component_id.clone());
+
+            let yaml_content = if let Some(ref id) = matched_id {
+                let comp = registry.get(id).ok_or_else(|| anyhow::anyhow!("component not found in registry"))?;
+                serde_yaml::to_string(&comp)?
+            } else {
+                println!("🌐 Fetching module '{module}' from free CDN registry...");
+                let cdn_url = format!("https://raw.githubusercontent.com/rimraf-adi/uxML/main/components/vision/{module}.yaml");
+                let output = std::process::Command::new("curl")
+                    .args(["-sSL", &cdn_url])
+                    .output()
+                    .map_err(|e| anyhow::anyhow!("failed to execute curl: {e}"))?;
+                if !output.status.success() || output.stdout.is_empty() {
+                    anyhow::bail!("could not fetch '{module}' from registry CDN (url: {cdn_url})");
+                }
+                String::from_utf8(output.stdout)?
+            };
+
+            let target_dir = if global {
+                ComponentRegistry::user_templates_dir()
+            } else {
+                cwd.join("components")
+            };
+            std::fs::create_dir_all(&target_dir)?;
+            let file_name = if module.ends_with(".yaml") { module } else { format!("{module}.yaml") };
+            let target_file = target_dir.join(&file_name);
+            std::fs::write(&target_file, &yaml_content)?;
+
+            println!("✨ Successfully added module to {}", target_file.display());
+            println!("   Origin: {}", if matched_id.is_some() { "built-in registry" } else { "sentinel-cdn" });
+            println!("   Inspect DAG: http://localhost:2512");
+            println!("   Train:       sentinel run {}", target_file.display());
+        }
         Some(Commands::Status { json, port }) => diag::status(json, port)?,
         Some(Commands::Top { interval, port, procs }) => diag::top(interval, port, procs).await?,
         Some(Commands::Gpus { json }) => diag::gpus(json)?,

@@ -384,3 +384,18 @@ def watch_model(model, log_freq: int = 10, out_dir: str = ".sentinel") -> Option
     """Attach forward and backward gradient/activation hooks for live telemetry in Sentinel."""
     return ModelFlowWatcher(model, log_freq=log_freq, out_dir=out_dir)
 
+
+# ---------------------------------------------------------
+# Sentinel Native Explainable AI (xAI) Exports
+# ---------------------------------------------------------
+try:
+    from .xai import (
+        integrated_gradients,
+        spectral_rank,
+        explain,
+        log_explanation,
+    )
+except ImportError:
+    pass
+
+

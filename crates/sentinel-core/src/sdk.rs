@@ -4,15 +4,21 @@
 use std::path::{Path, PathBuf};
 
 pub const SDK_SOURCE: &str = include_str!("../../../packages/sentinel-sdk/src/sentinel/__init__.py");
+pub const XAI_SOURCE: &str = include_str!("../../../packages/sentinel-sdk/src/sentinel/xai.py");
 
-/// Write `.sentinel/sdk/sentinel/__init__.py` (only if it changed) and return the directory to put on `PYTHONPATH`.
+/// Write `.sentinel/sdk/sentinel/__init__.py` and `xai.py` (only if changed) and return the directory to put on `PYTHONPATH`.
 pub fn ensure_sdk(root: &Path) -> std::io::Result<PathBuf> {
     let sdk_dir = root.join(".sentinel").join("sdk");
     let pkg = sdk_dir.join("sentinel");
     let file = pkg.join("__init__.py");
+    let xai_file = pkg.join("xai.py");
     if std::fs::read_to_string(&file).map_or(true, |cur| cur != SDK_SOURCE) {
         std::fs::create_dir_all(&pkg)?;
         std::fs::write(&file, SDK_SOURCE)?;
+    }
+    if std::fs::read_to_string(&xai_file).map_or(true, |cur| cur != XAI_SOURCE) {
+        std::fs::create_dir_all(&pkg)?;
+        std::fs::write(&xai_file, XAI_SOURCE)?;
     }
     Ok(sdk_dir)
 }

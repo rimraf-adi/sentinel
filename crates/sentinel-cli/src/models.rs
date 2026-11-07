@@ -92,6 +92,62 @@ pub fn run(cmd: ModelCommands) -> anyhow::Result<()> {
             std::fs::copy(&src, &dest)?;
             println!("{} -> {} ({} bytes)", src.display(), dest.display(), std::fs::metadata(&dest)?.len());
         }
+        ModelCommands::Explain { run, input, json } => {
+            let (id, dir) = resolve(&run)?;
+            let rows: Vec<Vec<f64>> = if let Some(inp) = input {
+                vec![inp
+                    .split(',')
+                    .map(|v| v.trim().parse::<f64>().map_err(|_| anyhow::anyhow!("'{v}' is not a number in --input \"{inp}\"", v = v.trim())))
+                    .collect::<Result<_, _>>()?]
+            } else {
+                let meta = predict::read_meta(&dir).unwrap_or_default();
+                let count = meta["features"].as_array().map(|a| a.len()).unwrap_or(4);
+                vec![vec![0.5; count]]
+            };
+
+            let result = predict::explain(&dir, &rows).map_err(|e| anyhow::anyhow!(e))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                return Ok(());
+            }
+
+            println!("=== Sentinel xAI: Integrated Gradients ===");
+            println!("Run: {} · Target Class: {}", &id[..8], result["target_class"]);
+            println!("\nTop Influential Features (Axiomatic Path Attribution):");
+            for attr in result["attributions"].as_array().into_iter().flatten() {
+                let name = attr["feature"].as_str().unwrap_or("?");
+                let val = attr["value"].as_f64().unwrap_or(0.0);
+                let a = attr["attribution"].as_f64().unwrap_or(0.0);
+                let pct = attr["importance_pct"].as_f64().unwrap_or(0.0);
+                let bar_len = (pct / 5.0).clamp(1.0, 20.0) as usize;
+                let bar = if a >= 0.0 {
+                    format!("\x1b[32m{:■<width$}\x1b[0m", "", width = bar_len)
+                } else {
+                    format!("\x1b[31m{:■<width$}\x1b[0m", "", width = bar_len)
+                };
+                println!("  {:<16} = {:>7.3} | {:>+8.4} ({:>5.1}%) {}", name, val, a, pct, bar);
+            }
+
+            if let Some(ranks) = result["spectral_ranks"].as_object() {
+                if !ranks.is_empty() {
+                    println!("\n=== Layer Representation Diagnostics (Spectral Rank) ===");
+                    println!("{:<32} {:>10} {:>10} {:>12} STATUS", "LAYER", "EFF_RANK", "MAX_RANK", "COLLAPSE");
+                    for (name, r) in ranks {
+                        let eff = r["effective_rank"].as_f64().unwrap_or(0.0);
+                        let max_r = r["max_rank"].as_f64().unwrap_or(1.0);
+                        let ratio = r["collapse_ratio"].as_f64().unwrap_or(1.0);
+                        let status = if ratio < 0.15 {
+                            "\x1b[31mCOLLAPSED\x1b[0m"
+                        } else if ratio < 0.4 {
+                            "\x1b[33mREDUCED\x1b[0m"
+                        } else {
+                            "\x1b[32mHEALTHY\x1b[0m"
+                        };
+                        println!("{:<32} {:>10.2} {:>10.0} {:>11.1}% {}", name, eff, max_r, ratio * 100.0, status);
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -154,6 +154,9 @@ impl Server {
             .route("/api/tracking/runs/:id/artifacts/:name", get(download_artifact))
             .route("/api/predict", post(predict_run))
             .route("/api/generate", post(generate_run))
+            .route("/api/explain", post(explain_run))
+            .route("/api/explain/live", get(live_explain))
+            .route("/api/explain/:id", get(get_run_explain))
             .route("/api/blocks", get(list_blocks))
             .route("/api/training/catalog", get(training_catalog))
             .route("/api/graph/validate", post(graph_validate))
@@ -989,3 +992,96 @@ async fn generate_run(Json(req): Json<GenerateRequest>) -> Result<Json<serde_jso
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ExplainRequest {
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub inputs: Vec<Vec<f64>>,
+}
+
+async fn live_explain() -> Result<Json<serde_json::Value>, ApiError> {
+    let path = std::path::Path::new(".sentinel").join("xai_explanation.json");
+    if path.exists() {
+        if let Ok(content) = tokio::fs::read_to_string(&path).await {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                return Ok(Json(val));
+            }
+        }
+    }
+    let root = mlruns_root();
+    for r in sentinel_core::tracking::list_runs(&root) {
+        if let Some(dir) = sentinel_core::tracking::run_dir(&root, &r.run_id) {
+            let art = dir.join("artifacts").join("xai_explanation.json");
+            if art.exists() {
+                if let Ok(content) = tokio::fs::read_to_string(&art).await {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        return Ok(Json(val));
+                    }
+                }
+            }
+        }
+    }
+    Err(api_err(StatusCode::NOT_FOUND, "no xAI explanation available"))
+}
+
+async fn get_run_explain(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json::Value>, ApiError> {
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &id)
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
+    let art = dir.join("artifacts").join("xai_explanation.json");
+    if art.exists() {
+        if let Ok(content) = tokio::fs::read_to_string(&art).await {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                return Ok(Json(val));
+            }
+        }
+    }
+    if let Some(meta) = sentinel_core::predict::read_meta(&dir) {
+        if let Some(feats) = meta["features"].as_array() {
+            let default_input = vec![vec![0.5; feats.len()]];
+            let result = tokio::task::spawn_blocking(move || sentinel_core::predict::explain(&dir, &default_input))
+                .await
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+            return result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e));
+        }
+    }
+    Err(api_err(StatusCode::NOT_FOUND, "no explanation found for this run"))
+}
+
+async fn explain_run(Json(req): Json<ExplainRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let run_id = match req.run_id {
+        Some(id) => id,
+        None => {
+            let root = mlruns_root();
+            sentinel_core::tracking::list_runs(&root)
+                .into_iter()
+                .find(|r| {
+                    sentinel_core::tracking::run_dir(&root, &r.run_id)
+                        .map(|d| sentinel_core::predict::read_meta(&d).is_some())
+                        .unwrap_or(false)
+                })
+                .map(|r| r.run_id)
+                .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no trained models found to explain"))?
+        }
+    };
+    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &run_id)
+        .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
+    let inputs = req.inputs;
+    let result = tokio::task::spawn_blocking(move || {
+        let final_inputs = if inputs.is_empty() {
+            if let Some(meta) = sentinel_core::predict::read_meta(&dir) {
+                let n_feats = meta["features"].as_array().map(|a| a.len()).unwrap_or(1);
+                vec![vec![0.5; n_feats]]
+            } else {
+                vec![vec![0.0]]
+            }
+        } else {
+            inputs
+        };
+        sentinel_core::predict::explain(&dir, &final_inputs)
+    })
+    .await
+    .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    result.map(Json).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))
+}
+

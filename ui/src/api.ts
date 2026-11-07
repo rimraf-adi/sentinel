@@ -262,6 +262,29 @@ export interface FlowTelemetry {
   layers: LayerFlowData[];
 }
 
+export interface FeatureAttribution {
+  feature: string;
+  value: number;
+  attribution: number;
+  importance_pct: number;
+  direction: 'positive' | 'negative' | 'neutral';
+}
+
+export interface SpectralRank {
+  effective_rank: number;
+  max_rank: number;
+  collapse_ratio: number;
+}
+
+export interface ExplainResult {
+  target_class: number;
+  delta_score?: number;
+  attributions: FeatureAttribution[];
+  top_positive: FeatureAttribution[];
+  top_negative: FeatureAttribution[];
+  spectral_ranks: Record<string, SpectralRank>;
+}
+
 export const api = {
   jobs: () => req<JobRecord[]>('/api/jobs'),
   logs: (id: string) => req<{ logs: string[] }>(`/api/jobs/${id}/logs`),
@@ -309,4 +332,7 @@ export const api = {
     post<{ ok: true; code: string }>('/api/graph/compose', b),
   runGraph: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) => post<JobRecord>('/api/graph/run', b),
   flowLive: () => req<FlowTelemetry>('/api/flow/live').catch(() => null),
+  explain: (run_id?: string, inputs?: number[][]) => post<ExplainResult>('/api/explain', { run_id, inputs: inputs ?? [] }),
+  liveExplain: () => req<ExplainResult>('/api/explain/live').catch(() => null),
+  runExplain: (id: string) => req<ExplainResult>(`/api/explain/${id}`).catch(() => null),
 };
