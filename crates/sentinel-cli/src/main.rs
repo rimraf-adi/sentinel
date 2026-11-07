@@ -83,6 +83,14 @@ enum Commands {
         #[arg(long)]
         global: bool,
     },
+    /// Publish a custom component/module to the decentralized sentinel-hub registry
+    Publish {
+        /// Path to the component YAML file to publish
+        path: String,
+        /// Optional path to local sentinel-hub directory
+        #[arg(long = "hub-dir")]
+        hub_dir: Option<String>,
+    },
     /// Use trained models: list exports, predict on new data, copy weights/TorchScript/ONNX out
     Model {
         #[command(subcommand)]
@@ -370,6 +378,91 @@ async fn main() -> anyhow::Result<()> {
             println!("   Origin:      {origin}");
             println!("   Inspect DAG: http://localhost:2512");
             println!("   Train:       sentinel run {}", target_file.display());
+        }
+        Some(Commands::Publish { path, hub_dir }) => {
+            let p = std::path::Path::new(&path);
+            if !p.exists() {
+                anyhow::bail!("file not found: {}", p.display());
+            }
+            let content = std::fs::read_to_string(p)?;
+            let comp = sentinel_core::components::Component::from_yaml(&content)
+                .map_err(|e| anyhow::anyhow!("validation failed: {e}"))?;
+
+            let (num_nodes, num_edges) = if let Some(ref g) = comp.graph {
+                let n = g.get("nodes").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
+                let e = g.get("edges").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
+                (n, e)
+            } else {
+                (0, 0)
+            };
+            println!("Validating '{}' ({})", comp.name, comp.component_id);
+            println!("  Domain:      {}", comp.domain);
+            println!("  Parameters:  {}", comp.parameters.len());
+            println!("  Nodes:       {}", num_nodes);
+            println!("  Edges:       {}", num_edges);
+
+            let hub_path = hub_dir
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    let cand = std::path::PathBuf::from("../sentinel-hub");
+                    if cand.exists() { Some(cand) } else { None }
+                })
+                .or_else(|| {
+                    if let Ok(home) = std::env::var("HOME") {
+                        let cand = std::path::PathBuf::from(home).join("Documents/100xcode/sentinel-hub");
+                        if cand.exists() { Some(cand) } else { None }
+                    } else {
+                        None
+                    }
+                });
+
+            let stem = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let safe_id = stem.strip_suffix(".yaml").or_else(|| stem.strip_suffix(".yml")).unwrap_or(&stem);
+
+            if let Some(hub) = hub_path {
+                let target_dir = hub.join("modules").join(&comp.domain);
+                std::fs::create_dir_all(&target_dir)?;
+                let target_file = target_dir.join(format!("{safe_id}.yaml"));
+                std::fs::write(&target_file, &content)?;
+
+                let reg_file = hub.join("registry.json");
+                if reg_file.exists() {
+                    let reg_str = std::fs::read_to_string(&reg_file)?;
+                    if let Ok(mut reg_val) = serde_json::from_str::<serde_json::Value>(&reg_str) {
+                        if let Some(modules) = reg_val["modules"].as_array_mut() {
+                            modules.retain(|m| m["id"].as_str() != Some(safe_id));
+                            modules.push(serde_json::json!({
+                                "id": safe_id,
+                                "component_id": comp.component_id,
+                                "name": comp.name,
+                                "domain": comp.domain,
+                                "path": format!("modules/{}/{safe_id}.yaml", comp.domain),
+                                "description": comp.description,
+                                "tags": [comp.domain, safe_id]
+                            }));
+                        }
+                        std::fs::write(&reg_file, serde_json::to_string_pretty(&reg_val)?)?;
+                    }
+                }
+
+                println!("\n✨ Published module to sentinel-hub!");
+                println!("   File:     {}", target_file.display());
+                println!("   Registry: {}", reg_file.display());
+                println!("   Next step: cd {} && git add . && git commit -m 'feat: add {}' && git push", hub.display(), safe_id);
+            } else {
+                println!("\n📦 Decentralized Manifest Entry (paste into sentinel-hub/registry.json):");
+                let entry = serde_json::json!({
+                    "id": safe_id,
+                    "component_id": comp.component_id,
+                    "name": comp.name,
+                    "domain": comp.domain,
+                    "path": format!("modules/{}/{safe_id}.yaml", comp.domain),
+                    "description": comp.description,
+                    "tags": [comp.domain, safe_id]
+                });
+                println!("{}", serde_json::to_string_pretty(&entry)?);
+                println!("\nSubmit a PR at: https://github.com/rimraf-adi/sentinel-hub/pulls");
+            }
         }
         Some(Commands::Status { json, port }) => diag::status(json, port)?,
         Some(Commands::Top { interval, port, procs }) => diag::top(interval, port, procs).await?,

@@ -394,6 +394,9 @@ try:
         spectral_rank,
         explain,
         log_explanation,
+        grad_cam,
+        attention_rollout,
+        loss_landscape,
     )
 except ImportError:
     pass

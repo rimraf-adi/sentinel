@@ -20,3 +20,4 @@ pub mod training;
 pub mod vitals;
 pub mod components;
 pub mod tracking;
+pub mod remediation;

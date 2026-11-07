@@ -181,3 +181,282 @@ def log_explanation(
         out_file.write_text(json.dumps(explanation, indent=2))
     except Exception:
         pass
+
+
+def grad_cam(
+    model,
+    input_tensor: Any,
+    target_layer_name: Optional[str] = None,
+    target_class: Optional[int] = None,
+) -> Dict[str, Any]:
+    r"""Compute Grad-CAM (Class Activation Map) for convolutional vision models.
+
+    L_{Grad-CAM} = ReLU(sum_k \alpha_k A^k), where \alpha_k = (1/Z) sum_{i,j} \partial y_c / \partial A^k_{i,j}
+    """
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    model.eval()
+    if not isinstance(input_tensor, torch.Tensor):
+        input_tensor = torch.tensor(input_tensor, dtype=torch.float32)
+
+    if input_tensor.dim() == 3:
+        input_tensor = input_tensor.unsqueeze(0)
+
+    device = next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
+    input_tensor = input_tensor.to(device)
+
+    # Locate target conv layer if not specified (pick last conv2d in model)
+    target_layer = None
+    resolved_layer_name = target_layer_name or ""
+    if target_layer_name:
+        for name, mod in model.named_modules():
+            if name == target_layer_name:
+                target_layer = mod
+                break
+    else:
+        for name, mod in model.named_modules():
+            if isinstance(mod, (nn.Conv2d, nn.BatchNorm2d)):
+                target_layer = mod
+                resolved_layer_name = name
+
+    if target_layer is None:
+        # Fallback to first module with 4D activations
+        for name, mod in model.named_modules():
+            if list(mod.parameters()) and len(list(mod.children())) == 0:
+                target_layer = mod
+                resolved_layer_name = name
+
+    if target_layer is None:
+        raise ValueError("No suitable convolutional layer found for Grad-CAM.")
+
+    activations: List[torch.Tensor] = []
+    gradients: List[torch.Tensor] = []
+
+    def fwd_hook(mod, inp, out):
+        t = out if isinstance(out, torch.Tensor) else out[0]
+        activations.append(t)
+
+    def bwd_hook(mod, grad_in, grad_out):
+        g = grad_out[0] if isinstance(grad_out, (list, tuple)) else grad_out
+        gradients.append(g)
+
+    h1 = target_layer.register_forward_hook(fwd_hook)
+    h2 = target_layer.register_full_backward_hook(bwd_hook)
+
+    try:
+        model.zero_grad()
+        out = model(input_tensor)
+        if out.dim() > 1 and out.shape[-1] > 1:
+            if target_class is None:
+                target_class = int(out.argmax(dim=-1).item())
+            loss = out[0, target_class]
+            prob = float(torch.softmax(out, dim=-1)[0, target_class].item())
+        else:
+            if target_class is None:
+                target_class = 0
+            loss = out.sum()
+            prob = float(torch.sigmoid(out)[0].item()) if out.numel() == 1 else 1.0
+
+        loss.backward()
+
+        act = activations[0].detach()
+        grad = gradients[0].detach()
+
+        # Global average pool gradients along spatial dimensions (H, W)
+        weights = grad.mean(dim=(-2, -1), keepdim=True)
+        cam = (weights * act).sum(dim=1, keepdim=True)
+        cam = F.relu(cam)
+
+        # Upsample to match input height and width
+        H, W = input_tensor.shape[-2], input_tensor.shape[-1]
+        if cam.shape[-2:] != (H, W):
+            cam = F.interpolate(cam, size=(H, W), mode="bilinear", align_corners=False)
+
+        cam = cam.squeeze().cpu()
+        cam_min, cam_max = cam.min(), cam.max()
+        if cam_max > cam_min:
+            cam = (cam - cam_min) / (cam_max - cam_min)
+        else:
+            cam = torch.zeros_like(cam)
+
+        heatmap = [[round(float(v), 4) for v in row] for row in cam.tolist()]
+
+        return {
+            "type": "grad_cam",
+            "layer": resolved_layer_name,
+            "target_class": target_class,
+            "confidence": round(prob, 4),
+            "grid_h": H,
+            "grid_w": W,
+            "heatmap": heatmap,
+        }
+    finally:
+        h1.remove()
+        h2.remove()
+
+
+def attention_rollout(model, input_tensor: Any) -> Dict[str, Any]:
+    r"""Compute Attention Rollout across transformer multi-head self-attention layers.
+
+    R_{l} = \tilde{A}_l \cdot R_{l-1}, where \tilde{A}_l = 0.5 * A_l + 0.5 * I
+    """
+    import torch
+    import torch.nn as nn
+
+    model.eval()
+    if not isinstance(input_tensor, torch.Tensor):
+        input_tensor = torch.tensor(input_tensor, dtype=torch.float32)
+
+    if input_tensor.dim() == 1:
+        input_tensor = input_tensor.unsqueeze(0)
+
+    device = next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
+    input_tensor = input_tensor.to(device)
+
+    attention_maps: List[torch.Tensor] = []
+
+    def make_attn_hook():
+        def hook(mod, inp, out):
+            # If attention module returns (output, weights)
+            if isinstance(out, tuple) and len(out) > 1 and isinstance(out[1], torch.Tensor):
+                attention_maps.append(out[1].detach().cpu())
+            elif isinstance(mod, nn.MultiheadAttention):
+                pass
+        return hook
+
+    hooks = []
+    for name, mod in model.named_modules():
+        if "attn" in name.lower() or "attention" in name.lower() or isinstance(mod, nn.MultiheadAttention):
+            hooks.append(mod.register_forward_hook(make_attn_hook()))
+
+    try:
+        with torch.no_grad():
+            _ = model(input_tensor)
+
+        if not attention_maps:
+            # Synthetic rollout from attention weights if model exposes layers
+            return {"type": "attention_rollout", "layers_tracked": 0, "rollout": []}
+
+        # Average attention across heads and compute rollout
+        rollout = torch.eye(attention_maps[0].shape[-1])
+        for attn in attention_maps:
+            if attn.dim() == 4:
+                attn = attn.mean(dim=1)  # mean over heads
+            attn = attn[0]  # first sample in batch
+            attn_with_identity = 0.5 * attn + 0.5 * torch.eye(attn.shape[-1])
+            attn_norm = attn_with_identity / attn_with_identity.sum(dim=-1, keepdim=True)
+            rollout = torch.matmul(attn_norm, rollout)
+
+        cls_rollout = rollout[0].tolist()  # CLS token attention to other tokens
+        return {
+            "type": "attention_rollout",
+            "layers_tracked": len(attention_maps),
+            "tokens": len(cls_rollout),
+            "rollout": [round(float(v), 5) for v in cls_rollout],
+        }
+    finally:
+        for h in hooks:
+            h.remove()
+
+
+def loss_landscape(
+    model,
+    inputs: Any,
+    targets: Any,
+    loss_fn=None,
+    grid_size: int = 15,
+    range_span: float = 1.0,
+) -> Dict[str, Any]:
+    r"""Compute filter-normalized 2D loss surface contour (Li et al., 2018).
+
+    L(\alpha, \beta) = \mathcal{L}(W^* + \alpha \delta + \beta \eta)
+    with filter-normalization: \delta_{i,j} = d_{i,j} * ||W_{i,j}|| / ||d_{i,j}||
+    """
+    import torch
+    import torch.nn as nn
+
+    model.eval()
+    if loss_fn is None:
+        loss_fn = nn.CrossEntropyLoss() if targets.dtype == torch.long or (isinstance(targets, torch.Tensor) and targets.dim() == 1) else nn.MSELoss()
+
+    device = next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
+    if not isinstance(inputs, torch.Tensor):
+        inputs = torch.tensor(inputs, dtype=torch.float32, device=device)
+    else:
+        inputs = inputs.to(device)
+
+    if not isinstance(targets, torch.Tensor):
+        targets = torch.tensor(targets, device=device)
+    else:
+        targets = targets.to(device)
+
+    # Save original base parameters W*
+    orig_weights = [p.data.clone() for p in model.parameters() if p.requires_grad]
+    params = [p for p in model.parameters() if p.requires_grad]
+
+    # Generate filter-normalized random directions delta and eta
+    delta: List[torch.Tensor] = []
+    eta: List[torch.Tensor] = []
+    for w in orig_weights:
+        d = torch.randn_like(w)
+        e = torch.randn_like(w)
+        # Filter-wise normalization
+        if w.dim() > 1:
+            w_norm = w.norm(dim=list(range(1, w.dim())), keepdim=True)
+            d_norm = d.norm(dim=list(range(1, d.dim())), keepdim=True) + 1e-7
+            e_norm = e.norm(dim=list(range(1, e.dim())), keepdim=True) + 1e-7
+            delta.append(d * (w_norm / d_norm))
+            eta.append(e * (w_norm / e_norm))
+        else:
+            w_norm = w.norm()
+            delta.append(d * (w_norm / (d.norm() + 1e-7)))
+            eta.append(e * (w_norm / (e.norm() + 1e-7)))
+
+    alphas = torch.linspace(-range_span, range_span, grid_size).tolist()
+    betas = torch.linspace(-range_span, range_span, grid_size).tolist()
+    surface: List[List[float]] = []
+
+    try:
+        with torch.no_grad():
+            for b in betas:
+                row: List[float] = []
+                for a in alphas:
+                    for p, w, d, e in zip(params, orig_weights, delta, eta):
+                        p.data.copy_(w + a * d + b * e)
+                    preds = model(inputs)
+                    loss_val = float(loss_fn(preds, targets).item())
+                    row.append(round(loss_val, 4))
+                surface.append(row)
+    finally:
+        # Restore original model weights
+        for p, w in zip(params, orig_weights):
+            p.data.copy_(w)
+
+    flat = [v for row in surface for v in row]
+    center_idx = grid_size // 2
+    center_loss = surface[center_idx][center_idx]
+    local_pts = [
+        surface[center_idx][center_idx],
+        surface[center_idx - 1][center_idx],
+        surface[center_idx + 1][center_idx],
+        surface[center_idx][center_idx - 1],
+        surface[center_idx][center_idx + 1],
+    ]
+    mean_local = sum(local_pts) / len(local_pts)
+    var_local = sum((x - mean_local) ** 2 for x in local_pts) / len(local_pts)
+    flatness_score = round(1.0 / (var_local + 1e-4), 2)
+
+    return {
+        "grid_size": grid_size,
+        "alphas": [round(a, 3) for a in alphas],
+        "betas": [round(b, 3) for b in betas],
+        "surface": surface,
+        "center_loss": center_loss,
+        "min_loss": min(flat),
+        "max_loss": max(flat),
+        "flatness_score": flatness_score,
+        "flatness_grade": "Wide Basin (Flat Minima)" if flatness_score > 500.0 else "Convex Slope" if flatness_score > 100.0 else "Sharp Ravine (Sensitive)",
+    }
+

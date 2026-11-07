@@ -285,6 +285,36 @@ export interface ExplainResult {
   spectral_ranks: Record<string, SpectralRank>;
 }
 
+export interface Prescription {
+  id: string;
+  severity: 'critical' | 'warning' | 'info';
+  category: 'convergence' | 'gradient' | 'capacity' | 'hardware';
+  title: string;
+  root_cause: string;
+  recommendation: string;
+  cli_command?: string;
+  patch?: Record<string, unknown>;
+}
+
+export interface DiagnosticReport {
+  healthy: boolean;
+  health_score: number;
+  prescriptions: Prescription[];
+  summary: string;
+}
+
+export interface LossLandscape {
+  grid_size: number;
+  alphas: number[];
+  betas: number[];
+  surface: number[][];
+  center_loss: number;
+  min_loss: number;
+  max_loss: number;
+  flatness_score: number;
+  flatness_grade: string;
+}
+
 export const api = {
   jobs: () => req<JobRecord[]>('/api/jobs'),
   logs: (id: string) => req<{ logs: string[] }>(`/api/jobs/${id}/logs`),
@@ -335,4 +365,7 @@ export const api = {
   explain: (run_id?: string, inputs?: number[][]) => post<ExplainResult>('/api/explain', { run_id, inputs: inputs ?? [] }),
   liveExplain: () => req<ExplainResult>('/api/explain/live').catch(() => null),
   runExplain: (id: string) => req<ExplainResult>(`/api/explain/${id}`).catch(() => null),
+  prescriptions: (run_id?: string) =>
+    req<DiagnosticReport>(run_id ? `/api/diagnostics/prescriptions/${run_id}` : '/api/diagnostics/prescriptions').catch(() => null),
+  lossLandscape: () => req<LossLandscape>('/api/loss-landscape').catch(() => null),
 };
