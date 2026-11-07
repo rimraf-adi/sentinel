@@ -206,7 +206,7 @@ packages/     sentinel-sdk (Python)
 recipes/      training loop, sweep orchestrator
 tests/        end-to-end and benchmark scripts
 guide.md      operating guide for agents
-sentinel.md   design document
+SENTINEL.md   operational manual and specification for agents
 ```
 
 ## Testing
