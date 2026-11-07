@@ -302,24 +302,58 @@ async fn main() -> anyhow::Result<()> {
             let cwd = std::env::current_dir().unwrap_or_default();
             let registry = ComponentRegistry::full(&cwd);
             
-            let matched_id = registry.list().into_iter().find(|c| {
-                c.component_id == module || c.component_id.contains(&module) || c.name.to_lowercase() == module.to_lowercase()
-            }).map(|c| c.component_id.clone());
+            // 1. Query Sentinel Hub CDN registry
+            let cdn_base = "https://raw.githubusercontent.com/rimraf-adi/sentinel-hub/main";
+            let mut resolved_yaml: Option<(String, String)> = None;
 
-            let yaml_content = if let Some(ref id) = matched_id {
-                let comp = registry.get(id).ok_or_else(|| anyhow::anyhow!("component not found in registry"))?;
-                serde_yaml::to_string(&comp)?
-            } else {
-                println!("🌐 Fetching module '{module}' from free CDN registry...");
-                let cdn_url = format!("https://raw.githubusercontent.com/rimraf-adi/uxML/main/components/vision/{module}.yaml");
-                let output = std::process::Command::new("curl")
-                    .args(["-sSL", &cdn_url])
-                    .output()
-                    .map_err(|e| anyhow::anyhow!("failed to execute curl: {e}"))?;
-                if !output.status.success() || output.stdout.is_empty() {
-                    anyhow::bail!("could not fetch '{module}' from registry CDN (url: {cdn_url})");
+            let reg_output = std::process::Command::new("curl")
+                .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", &format!("{cdn_base}/registry.json")])
+                .output();
+
+            if let Ok(out) = reg_output {
+                if out.status.success() {
+                    if let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                        if let Some(modules) = manifest["modules"].as_array() {
+                            let matched = modules.iter().find(|m| {
+                                m["id"].as_str() == Some(&module)
+                                    || m["component_id"].as_str() == Some(&module)
+                                    || m["name"].as_str().map(|s| s.to_lowercase()) == Some(module.to_lowercase())
+                            });
+                            if let Some(m) = matched {
+                                if let Some(path) = m["path"].as_str() {
+                                    let mod_url = format!("{cdn_base}/{path}");
+                                    let mod_out = std::process::Command::new("curl")
+                                        .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "5", &mod_url])
+                                        .output();
+                                    if let Ok(mo) = mod_out {
+                                        if mo.status.success() && !mo.stdout.is_empty() {
+                                            if let Ok(content) = String::from_utf8(mo.stdout) {
+                                                resolved_yaml = Some((content, "sentinel-hub (https://github.com/rimraf-adi/sentinel-hub)".to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                String::from_utf8(output.stdout)?
+            }
+
+            // 2. Offline / local fallback if CDN unavailable or module is built-in
+            let (yaml_content, origin) = match resolved_yaml {
+                Some(pair) => pair,
+                None => {
+                    let matched_id = registry.list().into_iter().find(|c| {
+                        c.component_id == module || c.component_id.contains(&module) || c.name.to_lowercase() == module.to_lowercase()
+                    }).map(|c| c.component_id.clone());
+
+                    if let Some(ref id) = matched_id {
+                        let comp = registry.get(id).ok_or_else(|| anyhow::anyhow!("component not found in local registry"))?;
+                        (serde_yaml::to_string(&comp)?, "built-in offline cache".to_string())
+                    } else {
+                        anyhow::bail!("module '{module}' not found in sentinel-hub or local built-ins. Run `sentinel component list` to see available local components.");
+                    }
+                }
             };
 
             let target_dir = if global {
@@ -328,12 +362,12 @@ async fn main() -> anyhow::Result<()> {
                 cwd.join("components")
             };
             std::fs::create_dir_all(&target_dir)?;
-            let file_name = if module.ends_with(".yaml") { module } else { format!("{module}.yaml") };
+            let file_name = if module.ends_with(".yaml") { module.clone() } else { format!("{module}.yaml") };
             let target_file = target_dir.join(&file_name);
             std::fs::write(&target_file, &yaml_content)?;
 
             println!("✨ Successfully added module to {}", target_file.display());
-            println!("   Origin: {}", if matched_id.is_some() { "built-in registry" } else { "sentinel-cdn" });
+            println!("   Origin:      {origin}");
             println!("   Inspect DAG: http://localhost:2512");
             println!("   Train:       sentinel run {}", target_file.display());
         }
