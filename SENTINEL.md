@@ -69,15 +69,21 @@ curl -s http://localhost:2512/api/hardware | jq .
 
 ## 3. Installation & Daemon Lifecycle
 
-### Building Sentinel from Source
+### Single-Command Installation (macOS & Linux)
 ```bash
-# Clone and build native release binary
+# Automated installer script (detects platform, builds/places binary into PATH)
+curl -fsSL https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.sh | bash
+
+# Or install directly via Cargo from git:
+cargo install --git https://github.com/rimraf-adi/sentinel.git sentinel-cli
+```
+
+### Manual Build from Source (Optional)
+```bash
 git clone https://github.com/rimraf-adi/sentinel.git
 cd sentinel
 uv sync
 cargo build --release -p sentinel-cli
-
-# Symlink or copy to PATH
 cp ./target/release/sentinel /usr/local/bin/sentinel
 ```
 

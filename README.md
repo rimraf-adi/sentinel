@@ -15,14 +15,22 @@ Training code stays plain PyTorch. Models are YAML graphs that export to a stand
 
 ## Quick start
 
-Requires Rust 1.75+, Python 3.10+, and [uv](https://github.com/astral-sh/uv).
+Install with a single command (macOS & Linux):
 
 ```bash
-git clone https://github.com/rimraf-adi/sentinel.git
-cd sentinel
-uv sync
-cargo build --release -p sentinel-cli
-./target/release/sentinel dev # dashboard at http://localhost:2512
+curl -fsSL https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.sh | bash
+```
+
+Or install via Cargo directly:
+
+```bash
+cargo install --git https://github.com/rimraf-adi/sentinel.git sentinel-cli
+```
+
+Once installed, launch the control plane & dashboard:
+
+```bash
+sentinel dev # dashboard active at http://localhost:2512
 ```
 
 Use `--port` to change the port. Run `sentinel doctor` to verify your Python and PyTorch setup.
