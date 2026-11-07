@@ -5,7 +5,6 @@ import { Icon } from '../icons';
 import { Sparkline } from '../Sparkline';
 import { EmptyState, Skeleton, StatusPill, fmtGB, fmtTime, useToast } from '../ui';
 
-const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
 const rate = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB/s` : b >= 1e3 ? `${(b / 1e3).toFixed(0)} KB/s` : `${b.toFixed(0)} B/s`);
 const metric = (v: number | undefined) => (v === undefined ? '' : Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(1) : (+v.toPrecision(3)).toString());
 
@@ -28,7 +27,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
         <div className="row sp" style={{ alignItems: 'flex-start' }}>
           <div>
             <div className="eyebrow">WORKSPACE</div>
-            <h1>{greeting()}{repo ? <> — <span style={{ background: 'var(--accent-grad)', WebkitBackgroundClip: 'text', color: 'transparent' }}>{repo.workspace_name}</span></> : null}</h1>
+            <h1>Welcome to <span style={{ color: 'var(--accent)' }}>{repo?.workspace_name ?? 'Sentinel'}</span></h1>
             <p className="mono" style={{ fontSize: 12 }}>{repo?.full_workspace_path ?? <Skeleton h={14} w={320} />}</p>
           </div>
           <div className="row">
