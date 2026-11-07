@@ -160,6 +160,11 @@ impl Server {
             .route("/api/diagnostics/prescriptions", get(live_prescriptions))
             .route("/api/diagnostics/prescriptions/:id", get(run_prescriptions))
             .route("/api/loss-landscape", post(loss_landscape_handler).get(live_loss_landscape))
+            .route("/api/protocol", get(get_protocol))
+            .route("/api/integrations", get(list_integrations_handler))
+            .route("/api/integrations/toggle", post(toggle_integration_handler))
+            .route("/api/integrations/add", post(add_integration_handler))
+            .route("/api/integrations/remove", post(remove_integration_handler))
             .route("/api/blocks", get(list_blocks))
             .route("/api/training/catalog", get(training_catalog))
             .route("/api/graph/validate", post(graph_validate))
@@ -1151,6 +1156,101 @@ async fn live_loss_landscape() -> Result<Json<serde_json::Value>, ApiError> {
 
 async fn loss_landscape_handler(Json(_payload): Json<serde_json::Value>) -> Result<Json<serde_json::Value>, ApiError> {
     live_loss_landscape().await
+}
+
+#[derive(Debug, Deserialize)]
+struct ToggleIntegrationReq {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AddIntegrationReq {
+    name: String,
+    version: Option<String>,
+    description: Option<String>,
+}
+
+async fn get_protocol() -> Result<Json<sentinel_core::protocol::ProtocolManifest>, ApiError> {
+    let root = std::env::current_dir().unwrap_or_default();
+    Ok(Json(sentinel_core::protocol::ProtocolManifest::load_or_default(&root)))
+}
+
+async fn list_integrations_handler() -> Result<Json<serde_json::Value>, ApiError> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&root);
+    
+    let mut catalog: Vec<serde_json::Value> = Vec::new();
+    let space = &proto.space;
+    let url = format!("{space}/integrations.json");
+    let out = std::process::Command::new("curl")
+        .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", &url])
+        .output();
+
+    if let Ok(o) = out {
+        if o.status.success() {
+            if let Ok(reg) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                if let Some(arr) = reg["integrations"].as_array() {
+                    for item in arr {
+                        let name = item["name"].as_str().unwrap_or_default();
+                        let active = proto.has_integration(name);
+                        let mut copy = item.clone();
+                        copy["active"] = serde_json::json!(active);
+                        catalog.push(copy);
+                    }
+                }
+            }
+        }
+    }
+
+    if catalog.is_empty() {
+        for i in &proto.integrations {
+            catalog.push(serde_json::json!({
+                "name": i.name,
+                "version": i.version,
+                "description": i.description.clone().unwrap_or_default(),
+                "active": i.enabled,
+                "ui_tab": i.name,
+                "category": "core"
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "space": proto.space,
+        "org": proto.org,
+        "integrations": catalog
+    })))
+}
+
+async fn toggle_integration_handler(Json(req): Json<ToggleIntegrationReq>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&root);
+    let new_state = proto.toggle_integration(&req.name).unwrap_or(false);
+    let _ = proto.save(&root);
+    Ok(Json(serde_json::json!({ "name": req.name, "enabled": new_state })))
+}
+
+async fn add_integration_handler(Json(req): Json<AddIntegrationReq>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&root);
+    proto.add_integration(sentinel_core::protocol::IntegrationSpec {
+        name: req.name.clone(),
+        version: req.version.unwrap_or_else(|| "1.0.0".to_string()),
+        source: "sentinel-hub".to_string(),
+        description: req.description,
+        enabled: true,
+        config: std::collections::HashMap::new(),
+    });
+    let _ = proto.save(&root);
+    Ok(Json(serde_json::json!({ "name": req.name, "status": "integrated" })))
+}
+
+async fn remove_integration_handler(Json(req): Json<ToggleIntegrationReq>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = std::env::current_dir().unwrap_or_default();
+    let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&root);
+    let removed = proto.remove_integration(&req.name);
+    let _ = proto.save(&root);
+    Ok(Json(serde_json::json!({ "name": req.name, "removed": removed })))
 }
 
 

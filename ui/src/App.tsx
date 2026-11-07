@@ -15,18 +15,20 @@ import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
 import { Flow } from './pages/Flow';
 import { Explain } from './pages/Explain';
+import { Integrations } from './pages/Integrations';
 
 const TABS = [
   { id: 'overview', label: 'Overview', group: 'Observability' },
   { id: 'runs', label: 'Runs', group: 'Observability' },
-  { id: 'flow', label: 'Gradient Flow', group: 'Observability' },
-  { id: 'xai', label: 'Explainability', group: 'Observability' },
+  { id: 'flow', label: 'Gradient Flow', group: 'Observability', pack: 'gradient-flow' },
+  { id: 'xai', label: 'Explainability', group: 'Observability', pack: 'xai' },
   { id: 'experiments', label: 'Experiments', group: 'Observability' },
-  { id: 'sweeps', label: 'Sweeps', group: 'Observability' },
+  { id: 'sweeps', label: 'Sweeps', group: 'Observability', pack: 'sweeps' },
   { id: 'system', label: 'System', group: 'Observability' },
   { id: 'components', label: 'Templates', group: 'Templates' },
   { id: 'visualizer', label: 'DAG Visualizer', group: 'Templates' },
   { id: 'datasets', label: 'Datasets', group: 'Templates' },
+  { id: 'integrations', label: 'Integrations', group: 'Protocol' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
@@ -54,6 +56,7 @@ export function App() {
   const jobs = usePoll(api.jobs, 2000);
   const datasets = usePoll(api.datasets, 5000);
   const components = usePoll(api.components, 10000);
+  const protocol = usePoll(api.protocol, 4000);
   const { hw, online } = useTelemetry();
 
   useEffect(() => {
@@ -82,8 +85,17 @@ export function App() {
   const r = repo.data;
   const running = jobs.data?.filter((j) => j.status === 'running').length ?? 0;
   const name = r?.workspace_name ?? 'sentinel';
-  const groups = [...new Set(TABS.map((t) => t.group))];
-  const title = TABS.find((t) => t.id === tab)!.label;
+  const activeIntegrations = protocol.data?.integrations ?? [];
+  const isTabEnabled = (t: (typeof TABS)[number]) => {
+    if ('pack' in t && t.pack) {
+      if (!protocol.data) return true;
+      return activeIntegrations.some((i) => i.name === t.pack && i.enabled);
+    }
+    return true;
+  };
+  const visibleTabs = TABS.filter(isTabEnabled);
+  const groups = [...new Set(visibleTabs.map((t) => t.group))];
+  const title = TABS.find((t) => t.id === tab)?.label ?? 'Overview';
 
   return (
     <ToastProvider>
@@ -106,13 +118,14 @@ export function App() {
             {groups.map((g) => (
               <div key={g} style={{ marginBottom: 14 }}>
                 <div className="nav-title">{g}</div>
-                {TABS.filter((t) => t.group === g).map((t) => (
+                {visibleTabs.filter((t) => t.group === g).map((t) => (
                   <button key={t.id} className={'nav-item' + (t.id === tab ? ' active' : '')} aria-current={t.id === tab ? 'page' : undefined} onClick={() => go(t.id)} title={t.label}>
                     <Icon name={t.id as IconName} />
                     <span className="nav-label">{t.label}</span>
                     {t.id === 'runs' && running > 0 && <span className="badge running" aria-label={`${running} running`}><span className="dot ok pulse" />{running}</span>}
                     {t.id === 'components' && (components.data?.length ?? 0) > 0 && <span className="badge">{components.data?.length}</span>}
                     {t.id === 'datasets' && (datasets.data?.length ?? 0) > 0 && <span className="badge">{datasets.data?.length}</span>}
+                    {t.id === 'integrations' && <span className="badge" style={{ color: 'var(--accent)' }}>{activeIntegrations.filter((i) => i.enabled).length} active</span>}
                   </button>
                 ))}
               </div>
@@ -151,6 +164,7 @@ export function App() {
             {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInVisualizer={openInVisualizer} />}
             {tab === 'visualizer' && <Visualizer initialComponent={visualizerComponent} onConsumed={() => setVisualizerComponent(null)} refreshJobs={jobs.refresh} go={go} />}
             {tab === 'datasets' && <Datasets datasets={datasets.data ?? []} refresh={datasets.refresh} />}
+            {tab === 'integrations' && <Integrations go={go} />}
           </main>
         </div>
       </div>

@@ -18,7 +18,10 @@ const P: Record<string, string> = {
   flow: 'M2 12h3l3-8 4 16 3-11 3 5 4-2',
   xai: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   arrow: 'M5 12h14 M13 6l6 6-6 6',
+  'arrow-right': 'M5 12h14 M12 5l7 7-7 7',
   layers: 'M12 2l10 5-10 5L2 7l10-5z',
+  integrations: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 17h6 M17 14v6',
+  terminal: 'M4 17l6-6-6-6 M12 19h8',
 };
 
 export type IconName = keyof typeof P;

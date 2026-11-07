@@ -368,4 +368,43 @@ export const api = {
   prescriptions: (run_id?: string) =>
     req<DiagnosticReport>(run_id ? `/api/diagnostics/prescriptions/${run_id}` : '/api/diagnostics/prescriptions').catch(() => null),
   lossLandscape: () => req<LossLandscape>('/api/loss-landscape').catch(() => null),
+  protocol: () => req<ProtocolManifest>('/api/protocol').catch(() => null),
+  integrations: () => req<IntegrationsResponse>('/api/integrations').catch(() => null),
+  toggleIntegration: (name: string) => post<{ name: string; enabled: boolean }>('/api/integrations/toggle', { name }),
+  addIntegration: (name: string, description?: string) => post<{ name: string; status: string }>('/api/integrations/add', { name, description }),
+  removeIntegration: (name: string) => post<{ name: string; removed: boolean }>('/api/integrations/remove', { name }),
 };
+
+export interface IntegrationItem {
+  name: string;
+  version: string;
+  title?: string;
+  description: string;
+  active: boolean;
+  ui_tab?: string;
+  category?: string;
+}
+
+export interface ProtocolManifest {
+  schema_version: string;
+  space: string;
+  org: string;
+  integrations: Array<{
+    name: string;
+    version: string;
+    source: string;
+    description?: string;
+    enabled: boolean;
+  }>;
+  policies?: {
+    min_representation_rank?: number;
+    max_gradient_norm?: number;
+    enforce_remediation?: boolean;
+  };
+}
+
+export interface IntegrationsResponse {
+  space: string;
+  org: string;
+  integrations: IntegrationItem[];
+}

@@ -83,7 +83,18 @@ enum Commands {
         #[arg(long)]
         global: bool,
     },
-    /// Publish a custom component/module to the decentralized sentinel-hub registry
+    /// Push a component or integration module directly to sentinel-hub (e.g. `sentinel push components/unet.yaml`)
+    Push {
+        /// Path or name of the component or integration YAML file to push
+        path: String,
+        /// Optional commit message
+        #[arg(short, long)]
+        message: Option<String>,
+        /// Optional path to local sentinel-hub directory
+        #[arg(long = "hub-dir")]
+        hub_dir: Option<String>,
+    },
+    /// Alias for `sentinel push`
     Publish {
         /// Path to the component YAML file to publish
         path: String,
@@ -135,6 +146,16 @@ enum Commands {
         /// Directory path (defaults to current directory ".")
         #[arg(default_value = ".")]
         path: String,
+    },
+    /// Manage modular capability integrations from sentinel-hub (e.g. `sentinel integrate add xai`)
+    Integrate {
+        #[command(subcommand)]
+        command: Option<IntegrateCommands>,
+    },
+    /// Manage project protocol and space configuration (e.g. `sentinel config set space <url>`)
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
     },
 }
 
@@ -249,6 +270,40 @@ enum ModelCommands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+pub enum IntegrateCommands {
+    /// List all integrations from sentinel-hub and local protocol
+    List,
+    /// Integrate a capability pack into the current project (e.g. `sentinel integrate add xai`)
+    Add {
+        /// Name of the integration (e.g. xai, gradient-flow, sweeps, eval-guard)
+        name: String,
+    },
+    /// Remove an integration from the current project
+    Remove {
+        /// Name of the integration to remove
+        name: String,
+    },
+    /// Toggle enable/disable status of an integration
+    Toggle {
+        /// Name of the integration to toggle
+        name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommands {
+    /// Set a configuration key (e.g. `sentinel config set space <url>`)
+    Set {
+        key: String,
+        value: String,
+    },
+    /// Get a configuration key (e.g. `sentinel config get space`)
+    Get {
+        key: String,
+    },
+}
+
 /// Rust ignores SIGPIPE, so `println!` panics when stdout is a closed pipe (`sentinel model list | head`). A CLI should
 /// exit quietly like every other Unix tool.
 #[cfg(unix)]
@@ -257,6 +312,186 @@ fn restore_sigpipe() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
+}
+
+fn handle_push(path: &str, message: Option<String>, hub_dir: Option<String>) -> anyhow::Result<()> {
+    let mut p = std::path::PathBuf::from(path);
+    if !p.exists() {
+        let cand1 = std::path::Path::new("components").join(path);
+        if cand1.exists() {
+            p = cand1;
+        } else {
+            let cand2 = std::path::Path::new("components").join(format!("{path}.yaml"));
+            if cand2.exists() {
+                p = cand2;
+            } else {
+                anyhow::bail!("file not found: {}", path);
+            }
+        }
+    }
+
+    let content = std::fs::read_to_string(&p)?;
+    let stem = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let safe_id = stem.strip_suffix(".yaml").or_else(|| stem.strip_suffix(".yml")).unwrap_or(&stem).to_string();
+
+    let hub = hub_dir
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let cand = std::path::PathBuf::from("../sentinel-hub");
+            if cand.join(".git").exists() { Some(cand) } else { None }
+        })
+        .or_else(|| {
+            if let Ok(home) = std::env::var("HOME") {
+                let cand = std::path::PathBuf::from(home).join("Documents/100xcode/sentinel-hub");
+                if cand.join(".git").exists() { Some(cand) } else { None }
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if let Ok(home) = std::env::var("HOME") {
+                let cand = std::path::PathBuf::from(home).join(".sentinel").join("hub");
+                if cand.join(".git").exists() { Some(cand) } else { None }
+            } else {
+                None
+            }
+        });
+
+    let hub_path = match hub {
+        Some(h) => h,
+        None => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let target = std::path::PathBuf::from(home).join(".sentinel").join("hub");
+            if let Some(parent) = target.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            println!("📥 Cloning decentralized sentinel-hub registry into {}...", target.display());
+            let status = std::process::Command::new("git")
+                .args(["clone", "--depth", "1", "https://github.com/rimraf-adi/sentinel-hub.git", &target.to_string_lossy()])
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("failed to clone sentinel-hub repository");
+            }
+            target
+        }
+    };
+
+    let is_component = sentinel_core::components::Component::from_yaml(&content).ok();
+
+    let (rel_dest, commit_msg, mod_id) = if let Some(comp) = is_component {
+        let (num_nodes, num_edges) = if let Some(ref g) = comp.graph {
+            let n = g.get("nodes").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
+            let e = g.get("edges").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
+            (n, e)
+        } else {
+            (0, 0)
+        };
+
+        println!("🚀 Pushing component '{}' ({}) to sentinel-hub...", comp.name, comp.component_id);
+        println!("   Domain:      {}", comp.domain);
+        println!("   Parameters:  {}", comp.parameters.len());
+        println!("   Nodes/Edges: {} nodes, {} edges", num_nodes, num_edges);
+
+        let target_dir = hub_path.join("modules").join(&comp.domain);
+        std::fs::create_dir_all(&target_dir)?;
+        let target_file = target_dir.join(format!("{safe_id}.yaml"));
+        std::fs::write(&target_file, &content)?;
+
+        let reg_file = hub_path.join("registry.json");
+        if reg_file.exists() {
+            let reg_str = std::fs::read_to_string(&reg_file)?;
+            if let Ok(mut reg_val) = serde_json::from_str::<serde_json::Value>(&reg_str) {
+                if let Some(modules) = reg_val["modules"].as_array_mut() {
+                    modules.retain(|m| m["id"].as_str() != Some(&safe_id));
+                    modules.push(serde_json::json!({
+                        "id": safe_id,
+                        "component_id": comp.component_id,
+                        "name": comp.name,
+                        "domain": comp.domain,
+                        "path": format!("modules/{}/{safe_id}.yaml", comp.domain),
+                        "description": comp.description,
+                        "tags": [comp.domain, safe_id]
+                    }));
+                }
+                std::fs::write(&reg_file, serde_json::to_string_pretty(&reg_val)?)?;
+            }
+        }
+        (
+            format!("modules/{}/{safe_id}.yaml", comp.domain),
+            message.unwrap_or_else(|| format!("feat(registry): push {} ({})", comp.name, comp.component_id)),
+            safe_id.clone()
+        )
+    } else {
+        println!("🚀 Pushing integration pack '{}' to sentinel-hub...", safe_id);
+        let target_dir = hub_path.join("integrations");
+        std::fs::create_dir_all(&target_dir)?;
+        let target_file = target_dir.join(format!("{safe_id}.yaml"));
+        std::fs::write(&target_file, &content)?;
+
+        let reg_file = hub_path.join("integrations.json");
+        if reg_file.exists() {
+            let reg_str = std::fs::read_to_string(&reg_file)?;
+            if let Ok(mut reg_val) = serde_json::from_str::<serde_json::Value>(&reg_str) {
+                if let Some(integrations) = reg_val["integrations"].as_array_mut() {
+                    integrations.retain(|i| i["name"].as_str() != Some(&safe_id));
+                    integrations.push(serde_json::json!({
+                        "name": safe_id,
+                        "version": "1.0.0",
+                        "category": "custom",
+                        "title": safe_id,
+                        "description": "Custom community integration pack",
+                        "ui_tab": safe_id,
+                        "file": format!("integrations/{safe_id}.yaml")
+                    }));
+                }
+                std::fs::write(&reg_file, serde_json::to_string_pretty(&reg_val)?)?;
+            }
+        }
+        (
+            format!("integrations/{safe_id}.yaml"),
+            message.unwrap_or_else(|| format!("feat(integrations): push {}", safe_id)),
+            safe_id.clone()
+        )
+    };
+
+    println!("📦 Staging changes in {}...", hub_path.display());
+    let _ = std::process::Command::new("git")
+        .current_dir(&hub_path)
+        .args(["add", "."])
+        .output();
+
+    let commit_res = std::process::Command::new("git")
+        .current_dir(&hub_path)
+        .args(["commit", "-m", &commit_msg])
+        .output();
+
+    if let Ok(c) = commit_res {
+        if !c.status.success() {
+            let stderr = String::from_utf8_lossy(&c.stderr);
+            if !stderr.contains("nothing to commit") {
+                eprintln!("git commit note: {}", stderr.trim());
+            }
+        }
+    }
+
+    println!("⬆️  Pushing to https://github.com/rimraf-adi/sentinel-hub (origin main)...");
+    let push_res = std::process::Command::new("git")
+        .current_dir(&hub_path)
+        .args(["push", "origin", "main"])
+        .output()?;
+
+    if !push_res.status.success() {
+        let err = String::from_utf8_lossy(&push_res.stderr);
+        anyhow::bail!("git push failed: {}", err.trim());
+    }
+
+    let cdn_url = format!("https://raw.githubusercontent.com/rimraf-adi/sentinel-hub/main/{rel_dest}");
+    println!("\n✨ Successfully pushed live to sentinel-hub!");
+    println!("   Hub repo:    https://github.com/rimraf-adi/sentinel-hub");
+    println!("   CDN URL:     {cdn_url}");
+    println!("   Available:   sentinel add --module {mod_id}");
+    println!("   Protocol:    Open access community hub");
+    Ok(())
 }
 
 #[tokio::main]
@@ -379,89 +614,135 @@ async fn main() -> anyhow::Result<()> {
             println!("   Inspect DAG: http://localhost:2512");
             println!("   Train:       sentinel run {}", target_file.display());
         }
+        Some(Commands::Push { path, message, hub_dir }) => {
+            handle_push(&path, message, hub_dir)?;
+        }
         Some(Commands::Publish { path, hub_dir }) => {
-            let p = std::path::Path::new(&path);
-            if !p.exists() {
-                anyhow::bail!("file not found: {}", p.display());
-            }
-            let content = std::fs::read_to_string(p)?;
-            let comp = sentinel_core::components::Component::from_yaml(&content)
-                .map_err(|e| anyhow::anyhow!("validation failed: {e}"))?;
+            handle_push(&path, None, hub_dir)?;
+        }
+        Some(Commands::Integrate { command }) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&cwd);
 
-            let (num_nodes, num_edges) = if let Some(ref g) = comp.graph {
-                let n = g.get("nodes").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
-                let e = g.get("edges").and_then(|v| v.as_sequence()).map(|s| s.len()).unwrap_or(0);
-                (n, e)
-            } else {
-                (0, 0)
-            };
-            println!("Validating '{}' ({})", comp.name, comp.component_id);
-            println!("  Domain:      {}", comp.domain);
-            println!("  Parameters:  {}", comp.parameters.len());
-            println!("  Nodes:       {}", num_nodes);
-            println!("  Edges:       {}", num_edges);
+            match command.unwrap_or(IntegrateCommands::List) {
+                IntegrateCommands::List => {
+                    println!("=== Sentinel Protocol & Active Integrations ===");
+                    println!("  Space:       {}", proto.space);
+                    println!("  Org:         {}", proto.org);
+                    println!("  Protocol:    {}\n", cwd.join(sentinel_core::protocol::PROTOCOL_FILENAME).display());
 
-            let hub_path = hub_dir
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    let cand = std::path::PathBuf::from("../sentinel-hub");
-                    if cand.exists() { Some(cand) } else { None }
-                })
-                .or_else(|| {
-                    if let Ok(home) = std::env::var("HOME") {
-                        let cand = std::path::PathBuf::from(home).join("Documents/100xcode/sentinel-hub");
-                        if cand.exists() { Some(cand) } else { None }
-                    } else {
-                        None
-                    }
-                });
-
-            let stem = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-            let safe_id = stem.strip_suffix(".yaml").or_else(|| stem.strip_suffix(".yml")).unwrap_or(&stem);
-
-            if let Some(hub) = hub_path {
-                let target_dir = hub.join("modules").join(&comp.domain);
-                std::fs::create_dir_all(&target_dir)?;
-                let target_file = target_dir.join(format!("{safe_id}.yaml"));
-                std::fs::write(&target_file, &content)?;
-
-                let reg_file = hub.join("registry.json");
-                if reg_file.exists() {
-                    let reg_str = std::fs::read_to_string(&reg_file)?;
-                    if let Ok(mut reg_val) = serde_json::from_str::<serde_json::Value>(&reg_str) {
-                        if let Some(modules) = reg_val["modules"].as_array_mut() {
-                            modules.retain(|m| m["id"].as_str() != Some(safe_id));
-                            modules.push(serde_json::json!({
-                                "id": safe_id,
-                                "component_id": comp.component_id,
-                                "name": comp.name,
-                                "domain": comp.domain,
-                                "path": format!("modules/{}/{safe_id}.yaml", comp.domain),
-                                "description": comp.description,
-                                "tags": [comp.domain, safe_id]
-                            }));
+                    let reg_url = format!("{}/integrations.json", proto.space);
+                    let mut remote_integrations: Vec<serde_json::Value> = Vec::new();
+                    let out = std::process::Command::new("curl")
+                        .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", &reg_url])
+                        .output();
+                    if let Ok(o) = out {
+                        if o.status.success() {
+                            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                                if let Some(arr) = val["integrations"].as_array() {
+                                    remote_integrations = arr.clone();
+                                }
+                            }
                         }
-                        std::fs::write(&reg_file, serde_json::to_string_pretty(&reg_val)?)?;
+                    }
+
+                    if !remote_integrations.is_empty() {
+                        println!("AVAILABLE INTEGRATIONS ({})", proto.space);
+                        for item in remote_integrations {
+                            let name = item["name"].as_str().unwrap_or("");
+                            let title = item["title"].as_str().unwrap_or(name);
+                            let desc = item["description"].as_str().unwrap_or("");
+                            let active = proto.has_integration(name);
+                            let mark = if active { "[x]" } else { "[ ]" };
+                            let tag = if active { "● ACTIVE" } else { "○ AVAILABLE" };
+                            println!("  {} {:<16} {:<40} {}", mark, name, title, tag);
+                            if !desc.is_empty() {
+                                println!("     └─ {}", desc);
+                            }
+                        }
+                    } else {
+                        println!("ACTIVE INTEGRATIONS (local):");
+                        for i in &proto.integrations {
+                            let mark = if i.enabled { "[x]" } else { "[ ]" };
+                            println!("  {} {} (v{})", mark, i.name, i.version);
+                        }
+                    }
+                    println!("\nRun `sentinel integrate add <name>` to install or activate an integration.");
+                }
+                IntegrateCommands::Add { name } => {
+                    let spec_url = format!("{}/integrations/{name}.yaml", proto.space);
+                    let out = std::process::Command::new("curl")
+                        .args(["-sSL", "-H", "Cache-Control: no-cache", "--max-time", "3", &spec_url])
+                        .output();
+                    let desc = if let Ok(ref o) = out {
+                        if o.status.success() {
+                            if let Ok(val) = serde_yaml::from_slice::<serde_yaml::Value>(&o.stdout) {
+                                val.get("description").and_then(|v| v.as_str()).map(|s| s.to_string())
+                            } else { None }
+                        } else { None }
+                    } else { None };
+
+                    proto.add_integration(sentinel_core::protocol::IntegrationSpec {
+                        name: name.clone(),
+                        version: "1.0.0".to_string(),
+                        source: proto.space.clone(),
+                        description: desc,
+                        enabled: true,
+                        config: std::collections::HashMap::new(),
+                    });
+                    let dest = proto.save(&cwd)?;
+                    println!("✨ Successfully integrated '{name}'!");
+                    println!("   Protocol:    {}", dest.display());
+                    println!("   Space:       {}", proto.space);
+                    println!("   Dashboard:   Active on http://localhost:2512");
+                }
+                IntegrateCommands::Remove { name } => {
+                    let removed = proto.remove_integration(&name);
+                    proto.save(&cwd)?;
+                    if removed {
+                        println!("✨ Successfully removed '{name}' from sentinel protocol.");
+                    } else {
+                        println!("Integration '{name}' was not found in active protocol.");
                     }
                 }
-
-                println!("\n✨ Published module to sentinel-hub!");
-                println!("   File:     {}", target_file.display());
-                println!("   Registry: {}", reg_file.display());
-                println!("   Next step: cd {} && git add . && git commit -m 'feat: add {}' && git push", hub.display(), safe_id);
-            } else {
-                println!("\n📦 Decentralized Manifest Entry (paste into sentinel-hub/registry.json):");
-                let entry = serde_json::json!({
-                    "id": safe_id,
-                    "component_id": comp.component_id,
-                    "name": comp.name,
-                    "domain": comp.domain,
-                    "path": format!("modules/{}/{safe_id}.yaml", comp.domain),
-                    "description": comp.description,
-                    "tags": [comp.domain, safe_id]
-                });
-                println!("{}", serde_json::to_string_pretty(&entry)?);
-                println!("\nSubmit a PR at: https://github.com/rimraf-adi/sentinel-hub/pulls");
+                IntegrateCommands::Toggle { name } => {
+                    if let Some(enabled) = proto.toggle_integration(&name) {
+                        proto.save(&cwd)?;
+                        println!("✨ Toggled '{name}': enabled = {enabled}");
+                    } else {
+                        anyhow::bail!("integration '{name}' not found in protocol manifest");
+                    }
+                }
+            }
+        }
+        Some(Commands::Config { command }) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let mut proto = sentinel_core::protocol::ProtocolManifest::load_or_default(&cwd);
+            match command {
+                ConfigCommands::Set { key, value } => {
+                    match key.to_lowercase().as_str() {
+                        "space" | "registry" => {
+                            proto.space = value.clone();
+                            proto.save(&cwd)?;
+                            println!("✨ Updated protocol space registry to: {value}");
+                        }
+                        "org" => {
+                            proto.org = value.clone();
+                            proto.save(&cwd)?;
+                            println!("✨ Updated organization to: {value}");
+                        }
+                        other => {
+                            anyhow::bail!("unknown config key '{other}'. Available keys: 'space', 'org'");
+                        }
+                    }
+                }
+                ConfigCommands::Get { key } => {
+                    match key.to_lowercase().as_str() {
+                        "space" | "registry" => println!("{}", proto.space),
+                        "org" => println!("{}", proto.org),
+                        other => anyhow::bail!("unknown config key '{other}'"),
+                    }
+                }
             }
         }
         Some(Commands::Status { json, port }) => diag::status(json, port)?,
