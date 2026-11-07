@@ -33,7 +33,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
           </div>
           <div className="row">
             <button className="btn" onClick={() => go('runs')}><Icon name="runs" size={14} /> Runs{running.length > 0 && ` · ${running.length} live`}</button>
-            <button className="btn primary" onClick={() => go('components')}><Icon name="components" size={14} /> Templates</button>
+            <button className="btn primary" onClick={() => go('visualizer')}><Icon name="visualizer" size={14} /> DAG Visualizer</button>
           </div>
         </div>
       </section>

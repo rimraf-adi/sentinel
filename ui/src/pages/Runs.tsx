@@ -116,9 +116,9 @@ export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => 
                   <EmptyState 
                     icon={<Icon name="runs" size={20} />} 
                     title="No runs yet" 
-                    hint="Start a component, or run any training script under Sentinel supervision."
+                    hint="Start a training run via CLI or execute any script under Sentinel supervision."
                   >
-                    <button className="btn primary" onClick={() => go('components')}>Pick a template</button>
+                    <button className="btn primary" onClick={() => go('visualizer')}>DAG Visualizer</button>
                   </EmptyState>
                 </td>
               </tr>

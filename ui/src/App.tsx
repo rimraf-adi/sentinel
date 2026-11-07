@@ -9,7 +9,6 @@ import { Overview } from './pages/Overview';
 import { Runs } from './pages/Runs';
 import { Experiments } from './pages/Experiments';
 import { Sweeps } from './pages/Sweeps';
-import { Components } from './pages/Components';
 import { Builder as Visualizer } from './builder/Builder';
 import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
@@ -25,9 +24,8 @@ const TABS = [
   { id: 'experiments', label: 'Experiments', group: 'Observability' },
   { id: 'sweeps', label: 'Sweeps', group: 'Observability', pack: 'sweeps' },
   { id: 'system', label: 'System', group: 'Observability' },
-  { id: 'components', label: 'Templates', group: 'Templates' },
-  { id: 'visualizer', label: 'DAG Visualizer', group: 'Templates' },
-  { id: 'datasets', label: 'Datasets', group: 'Templates' },
+  { id: 'visualizer', label: 'DAG Visualizer', group: 'Architecture' },
+  { id: 'datasets', label: 'Datasets', group: 'Architecture' },
   { id: 'integrations', label: 'Integrations', group: 'Protocol' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
@@ -37,7 +35,7 @@ const parseHash = (): { tab: Tab; component: string | null } => {
   const [tabPart, compPart] = raw.split(/[:?]/);
   let t = tabPart;
   if (t === 'builder') t = 'visualizer';
-  if (t === 'templates') t = 'components';
+  if (t === 'templates' || t === 'components') t = 'visualizer';
   const tab = (TABS.find((x) => x.id === t)?.id ?? 'overview') as Tab;
   let component: string | null = null;
   if (compPart) {
@@ -55,7 +53,6 @@ export function App() {
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
   const datasets = usePoll(api.datasets, 5000);
-  const components = usePoll(api.components, 10000);
   const protocol = usePoll(api.protocol, 4000);
   const { hw, online } = useTelemetry();
 
@@ -102,7 +99,7 @@ export function App() {
       <a className="skip" href="#main">Skip to content</a>
       <div className="app">
         <aside className="sidebar">
-          <div className="brand"><Logo size={28} /><div className="brand-text"><b>sentinel</b><small>OBSERVABILITY &amp; TEMPLATES</small></div></div>
+          <div className="brand"><Logo size={28} /><div className="brand-text"><b>sentinel</b><small>NEURAL OBSERVABILITY</small></div></div>
           <div className="ws-card">
             <div className="ws-card-header">
               <span className="ws-name">{name}</span>
@@ -123,13 +120,27 @@ export function App() {
                     <Icon name={t.id as IconName} />
                     <span className="nav-label">{t.label}</span>
                     {t.id === 'runs' && running > 0 && <span className="badge running" aria-label={`${running} running`}><span className="dot ok pulse" />{running}</span>}
-                    {t.id === 'components' && (components.data?.length ?? 0) > 0 && <span className="badge">{components.data?.length}</span>}
                     {t.id === 'datasets' && (datasets.data?.length ?? 0) > 0 && <span className="badge">{datasets.data?.length}</span>}
                     {t.id === 'integrations' && <span className="badge" style={{ color: 'var(--accent)' }}>{activeIntegrations.filter((i) => i.enabled).length} active</span>}
                   </button>
                 ))}
               </div>
             ))}
+            <div style={{ marginTop: 14, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="nav-title">Community</div>
+              <a 
+                href="http://localhost:3345" 
+                target="_blank" 
+                rel="noreferrer" 
+                className="nav-item" 
+                title="Browse declarative templates & capability packs on Sentinel Hub"
+                style={{ textDecoration: 'none' }}
+              >
+                <Icon name="external" />
+                <span className="nav-label">Sentinel Hub ↗</span>
+                <span className="badge" style={{ fontSize: 9, color: 'var(--accent)' }}>REGISTRY</span>
+              </a>
+            </div>
           </nav>
           <div className="sidebar-footer">
             <div className="agent-badge-card">
@@ -161,7 +172,6 @@ export function App() {
             {tab === 'experiments' && <Experiments go={go} />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}
             {tab === 'system' && <System hw={hw} />}
-            {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInVisualizer={openInVisualizer} />}
             {tab === 'visualizer' && <Visualizer initialComponent={visualizerComponent} onConsumed={() => setVisualizerComponent(null)} refreshJobs={jobs.refresh} go={go} />}
             {tab === 'datasets' && <Datasets datasets={datasets.data ?? []} refresh={datasets.refresh} />}
             {tab === 'integrations' && <Integrations go={go} />}

@@ -22,14 +22,16 @@ const P: Record<string, string> = {
   layers: 'M12 2l10 5-10 5L2 7l10-5z',
   integrations: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 17h6 M17 14v6',
   terminal: 'M4 17l6-6-6-6 M12 19h8',
+  external: 'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6 M15 3h6v6 M10 14L21 3',
 };
 
 export type IconName = keyof typeof P;
 
-export function Icon({ name, size = 16, ...rest }: { name: IconName; size?: number } & Omit<SVGProps<SVGSVGElement>, 'name'>) {
+export function Icon({ name, size = 16, ...rest }: { name: IconName | string; size?: number } & Omit<SVGProps<SVGSVGElement>, 'name'>) {
+  const path = P[name] || P.flow || '';
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...rest}>
-      {P[name].split(' M').map((d, i) => <path key={i} d={(i ? 'M' : '') + d} />)}
+      {path.split(' M').map((d, i) => <path key={i} d={(i ? 'M' : '') + d} />)}
     </svg>
   );
 }
