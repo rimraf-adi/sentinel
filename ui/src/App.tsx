@@ -12,14 +12,12 @@ import { Sweeps } from './pages/Sweeps';
 import { Builder as Visualizer } from './builder/Builder';
 import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
-import { Flow } from './pages/Flow';
 import { Explain } from './pages/Explain';
 import { Integrations } from './pages/Integrations';
 
 const TABS = [
   { id: 'overview', label: 'Overview', group: 'Observability' },
   { id: 'runs', label: 'Runs', group: 'Observability' },
-  { id: 'flow', label: 'Gradient Flow', group: 'Observability', pack: 'gradient-flow' },
   { id: 'xai', label: 'Explainability', group: 'Observability', pack: 'xai' },
   { id: 'experiments', label: 'Experiments', group: 'Observability' },
   { id: 'sweeps', label: 'Sweeps', group: 'Observability', pack: 'sweeps' },
@@ -164,10 +162,9 @@ export function App() {
               <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
             </div>
           </header>
-          <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' || tab === 'flow' ? ' fill' : '')}>
+          <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' ? ' fill' : '')}>
             {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} />}
             {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} go={go} />}
-            {tab === 'flow' && <Flow go={go} />}
             {tab === 'xai' && <Explain />}
             {tab === 'experiments' && <Experiments go={go} />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}

@@ -2,10 +2,8 @@ import { useEffect, useState } from 'react';
 import { api, type JobRecord } from '../api';
 import { Icon } from '../icons';
 import { EmptyState, Modal, StatusPill, fmtTime, useToast } from '../ui';
-import { Flow } from './Flow';
 
-function JobInspector({ job, onClose, go }: { job: JobRecord; onClose: () => void; go: (t: string) => void }) {
-  const [tab, setTab] = useState<'flow' | 'logs'>(job.status === 'running' ? 'flow' : 'logs');
+function Logs({ job, onClose }: { job: JobRecord; onClose: () => void }) {
   const [lines, setLines] = useState<string[]>([]);
 
   useEffect(() => {
@@ -17,43 +15,10 @@ function JobInspector({ job, onClose, go }: { job: JobRecord; onClose: () => voi
   }, [job.spec.id, job.status]);
 
   return (
-    <Modal wide title={`Live Telemetry · ${job.spec.name}`} sub={job.spec.id} onClose={onClose}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Tab switch between Live Flow & Logs */}
-        <div className="row sp" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-          <div className="chips" role="group">
-            <button 
-              className={'chip' + (tab === 'flow' ? ' on' : '')} 
-              onClick={() => setTab('flow')}
-            >
-              <span className={'dot ' + (job.status === 'running' ? 'ok pulse' : 'info')} style={{ marginRight: 6 }} />
-              Live Gradient Flow &amp; Probing
-            </button>
-            <button 
-              className={'chip' + (tab === 'logs' ? ' on' : '')} 
-              onClick={() => setTab('logs')}
-            >
-              Execution Logs ({lines.length} lines)
-            </button>
-          </div>
-
-          <div className="row" style={{ gap: 8 }}>
-            <button className="btn sm" onClick={() => { onClose(); go('flow'); }}>
-              Open Fullscreen Flow ↗
-            </button>
-          </div>
-        </div>
-
-        {tab === 'flow' ? (
-          <div style={{ height: 480, display: 'flex', flexDirection: 'column' }}>
-            <Flow compact embeddedJobId={job.spec.id} />
-          </div>
-        ) : (
-          <pre className="code" style={{ maxHeight: 480, overflowY: 'auto' }}>
-            {lines.length ? lines.join('\n') : 'No logs captured yet.'}
-          </pre>
-        )}
-      </div>
+    <Modal wide title={`Execution Logs · ${job.spec.name}`} sub={job.spec.id} onClose={onClose}>
+      <pre className="code" style={{ maxHeight: 520, overflowY: 'auto' }}>
+        {lines.length ? lines.join('\n') : 'No logs captured yet.'}
+      </pre>
     </Modal>
   );
 }
@@ -92,7 +57,7 @@ export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => 
         <div>
           <div className="eyebrow">EXECUTION</div>
           <h1 className="page-title">Runs</h1>
-          <p className="page-sub">Supervised training jobs with real-time gradient &amp; activation flow inspection.</p>
+          <p className="page-sub">Supervised training jobs on this machine.</p>
         </div>
         <button className="btn primary" onClick={() => setCustom(true)}>+ New run</button>
       </div>
@@ -135,19 +100,8 @@ export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => 
                 <td className="mono">{j.exit_code ?? '—'}</td>
                 <td>
                   <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-                    <button 
-                      className={'btn sm' + (j.status === 'running' ? ' primary' : '')} 
-                      onClick={() => setOpen(j.spec.id)} 
-                      title="Inspect Live Gradient &amp; Activation Flow"
-                    >
-                      {j.status === 'running' ? (
-                        <>
-                          <span className="dot ok pulse" style={{ marginRight: 4 }} />
-                          Live Flow &amp; Probing
-                        </>
-                      ) : (
-                        'Flow & Logs'
-                      )}
+                    <button className="btn sm" onClick={() => setOpen(j.spec.id)}>
+                      Logs
                     </button>
                     {j.status === 'running' && (
                       <button className="btn sm danger" onClick={() => stop(j.spec.id)}>
@@ -162,7 +116,7 @@ export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => 
         </table>
       </div>
 
-      {job && <JobInspector job={job} onClose={() => setOpen(null)} go={go} />}
+      {job && <Logs job={job} onClose={() => setOpen(null)} />}
 
       {custom && (
         <Modal title="New command run" sub="Run any shell command under Sentinel supervision" onClose={() => setCustom(false)}>
