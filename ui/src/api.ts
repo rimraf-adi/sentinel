@@ -246,19 +246,40 @@ const post = <T>(path: string, body?: unknown) =>
 export interface LayerFlowData {
   name: string;
   activation_mean: number;
-  activation_std: number;
-  dead_pct: number;
+  activation_std?: number;
+  dead_pct?: number;
   gradient_norm: number;
-  gradient_mean: number;
+  gradient_mean?: number;
   status: 'healthy' | 'vanishing' | 'exploding' | 'dead';
-  shape: (number | string)[];
+  stability?: number;
+  is_burst?: boolean;
+  is_clipped?: boolean;
+  shape?: (number | string)[];
+}
+
+export interface BurstEvent {
+  detected: boolean;
+  layer: string | null;
+  norm: number;
+  threshold: number;
+}
+
+export interface ClippingStatus {
+  active: boolean;
+  clipped_layers: string[];
+  threshold: number;
+  scale_factor: number;
 }
 
 export interface FlowTelemetry {
   step: number;
   timestamp: number;
   vanishing_ratio: number;
+  total_grad_norm?: number;
   exploding: boolean;
+  is_active?: boolean;
+  burst?: BurstEvent;
+  clipping?: ClippingStatus;
   layers: LayerFlowData[];
 }
 

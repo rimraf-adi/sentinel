@@ -333,35 +333,75 @@ class ModelFlowWatcher:
             return
         layers_data = []
         grad_norms = []
+        burst_detected = False
+        burst_layer = None
+        burst_norm = 0.0
+        clipped_layers = []
+
+        clip_limit = 1.0
+        burst_limit = 5.0
+
         for l_name, act_data in self.activations.items():
             g_data = self.gradients.get(l_name, {"norm": 0.0, "mean": 0.0})
             norm = g_data["norm"]
             grad_norms.append(norm)
+
+            dead_pct = act_data.get("dead_pct", 0.0)
             status = "healthy"
-            if norm < 1e-5:
-                status = "vanishing"
-            elif norm > 10.0:
+            is_clipped = norm > clip_limit
+            is_burst = norm > burst_limit
+
+            if is_burst:
+                burst_detected = True
+                burst_layer = l_name
+                burst_norm = max(burst_norm, norm)
                 status = "exploding"
-            elif act_data.get("dead_pct", 0) > 80:
+            elif norm < 1e-5:
+                status = "vanishing"
+            elif dead_pct > 80:
                 status = "dead"
+
+            if is_clipped:
+                clipped_layers.append(l_name)
+
+            # Stability index: high variance in activation + balanced gradients = high stability
+            stability = max(0.0, min(100.0, (1.0 - (dead_pct / 100.0)) * (1.0 / (1.0 + abs(norm - 0.5))) * 100.0))
 
             layers_data.append({
                 "name": l_name,
                 "activation_mean": act_data["mean"],
                 "activation_std": act_data["std"],
-                "dead_pct": act_data["dead_pct"],
+                "dead_pct": dead_pct,
                 "gradient_norm": norm,
                 "gradient_mean": g_data["mean"],
                 "status": status,
+                "stability": round(stability, 1),
+                "is_clipped": is_clipped,
+                "is_burst": is_burst,
                 "shape": act_data.get("shape", []),
             })
 
         vanishing_ratio = (grad_norms[0] / max(grad_norms[-1], 1e-8)) if len(grad_norms) >= 2 else 1.0
+        total_norm = (sum(n * n for n in grad_norms) ** 0.5) if grad_norms else 0.0
+
         payload = {
             "step": self.step,
             "timestamp": time.time(),
-            "vanishing_ratio": vanishing_ratio,
-            "exploding": any(n > 10.0 for n in grad_norms),
+            "vanishing_ratio": round(vanishing_ratio, 3),
+            "total_grad_norm": round(total_norm, 3),
+            "exploding": burst_detected,
+            "burst": {
+                "detected": burst_detected,
+                "layer": burst_layer,
+                "norm": round(burst_norm, 3),
+                "threshold": burst_limit,
+            },
+            "clipping": {
+                "active": len(clipped_layers) > 0,
+                "clipped_layers": clipped_layers,
+                "threshold": clip_limit,
+                "scale_factor": round(clip_limit / max(total_norm, 1e-6), 3) if total_norm > clip_limit else 1.0,
+            },
             "layers": layers_data,
         }
         flow_file = self.out_dir / "live_flow.json"

@@ -38,6 +38,25 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
         </div>
       </section>
 
+      {running.length > 0 && (
+        <div className="card alert hover" style={{ background: 'rgba(56, 189, 248, 0.06)', border: '1px solid rgba(56, 189, 248, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="dot ok pulse" style={{ width: 10, height: 10 }} />
+            <div>
+              <b style={{ color: '#fff', fontSize: 13 }}>Live Training in Progress: {running[0].spec.name}</b>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                Real-time dual-pass gradient flow, burst detection &amp; stability visual probing active.
+              </p>
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn primary sm" onClick={() => go('flow')}>
+              Open Live Visual Flow ↗
+            </button>
+          </div>
+        </div>
+      )}
+
       {repo && !repo.is_sentinel_repo && (
         <div className="alert">
           <span>This directory is not a Sentinel repository yet (no <span className="mono">sentinel.lock</span>).</span>
