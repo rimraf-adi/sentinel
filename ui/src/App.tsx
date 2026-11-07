@@ -10,10 +10,9 @@ import { Runs } from './pages/Runs';
 import { Experiments } from './pages/Experiments';
 import { Sweeps } from './pages/Sweeps';
 import { Components } from './pages/Components';
-import { Builder } from './builder/Builder';
+import { Builder as Visualizer } from './builder/Builder';
 import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
-import { Code } from './pages/Code';
 
 const TABS = [
   { id: 'overview', label: 'Overview', group: 'Workspace' },
@@ -22,18 +21,21 @@ const TABS = [
   { id: 'sweeps', label: 'Sweeps', group: 'Workspace' },
   { id: 'system', label: 'System', group: 'Workspace' },
   { id: 'components', label: 'Components', group: 'Project' },
-  { id: 'builder', label: 'Builder', group: 'Project' },
+  { id: 'visualizer', label: 'DAG Visualizer', group: 'Project' },
   { id: 'datasets', label: 'Datasets', group: 'Project' },
-  { id: 'code', label: 'Code (Read-Only)', group: 'Project' },
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
-const fromHash = (): Tab => (TABS.find((t) => t.id === location.hash.slice(1))?.id ?? 'overview');
+const fromHash = (): Tab => {
+  const h = location.hash.slice(1);
+  if (h === 'builder') return 'visualizer';
+  return (TABS.find((t) => t.id === h)?.id ?? 'overview');
+};
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function App() {
   const [tab, setTab] = useState<Tab>(fromHash);
-  const [builderComponent, setBuilderComponent] = useState<string | null>(null);
+  const [visualizerComponent, setVisualizerComponent] = useState<string | null>(null);
   const [palette, setPalette] = useState(false);
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
@@ -53,7 +55,7 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, []);
   const go = useCallback((t: string) => { location.hash = t; }, []);
-  const openInBuilder = useCallback((id: string) => { setBuilderComponent(id); go('builder'); }, [go]);
+  const openInVisualizer = useCallback((id: string) => { setVisualizerComponent(id); go('visualizer'); }, [go]);
   const closePalette = useCallback(() => setPalette(false), []);
 
   const r = repo.data;
@@ -104,20 +106,19 @@ export function App() {
               <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
             </div>
           </header>
-          <main id="main" tabIndex={-1} className={'content' + (tab === 'builder' || tab === 'code' ? ' fill' : '')}>
-            {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} openInBuilder={openInBuilder} />}
+          <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' ? ' fill' : '')}>
+            {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} />}
             {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} go={go} />}
             {tab === 'experiments' && <Experiments go={go} />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}
             {tab === 'system' && <System hw={hw} />}
-            {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInBuilder={openInBuilder} />}
-            {tab === 'builder' && <Builder initialComponent={builderComponent} onConsumed={() => setBuilderComponent(null)} refreshJobs={jobs.refresh} go={go} />}
+            {tab === 'components' && <Components refresh={jobs.refresh} go={go} openInVisualizer={openInVisualizer} />}
+            {tab === 'visualizer' && <Visualizer initialComponent={visualizerComponent} onConsumed={() => setVisualizerComponent(null)} refreshJobs={jobs.refresh} go={go} />}
             {tab === 'datasets' && <Datasets datasets={datasets.data ?? []} refresh={datasets.refresh} />}
-            {tab === 'code' && <Code />}
           </main>
         </div>
       </div>
-      {palette && <CommandPalette onClose={closePalette} go={go} openInBuilder={openInBuilder} tabs={TABS.map((t) => ({ id: t.id, label: t.label }))} />}
+      {palette && <CommandPalette onClose={closePalette} go={go} openInVisualizer={openInVisualizer} tabs={TABS.map((t) => ({ id: t.id, label: t.label }))} />}
     </ToastProvider>
   );
 }

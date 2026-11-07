@@ -8,6 +8,7 @@ const P: Record<string, string> = {
   system: 'M5 5h14v14H5z M9 9h6v6H9z M9 2v3 M15 2v3 M9 19v3 M15 19v3 M19 9h3 M19 14h3 M2 9h3 M2 14h3',
   components: 'M12 2l10 5-10 5L2 7l10-5z M2 17l10 5 10-5 M2 12l10 5 10-5',
   builder: 'M3 3h6v6H3z M15 15h6v6h-6z M9 6h3a3 3 0 0 1 3 3v6',
+  visualizer: 'M3 3h6v6H3z M15 15h6v6h-6z M9 6h3a3 3 0 0 1 3 3v6',
   datasets: 'M12 3c4.97 0 9 1.34 9 3s-4.03 3-9 3-9-1.34-9-3 4.03-3 9-3z M3 6v6c0 1.66 4.03 3 9 3s9-1.34 9-3V6 M3 12v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6',
   code: 'M16 18l6-6-6-6 M8 6l-6 6 6 6',
   search: 'M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3',

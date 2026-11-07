@@ -64,7 +64,7 @@ function ModelPanel({ run }: { run: TrackedRun }) {
     <div className="card">
       <div className="row sp"><b>Model · {run.run_name} <span className="mono" style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{run.run_id.slice(0, 8)}</span></b>
         {meta && <span className="tag">{meta.task}</span>}</div>
-      {!meta ? <p className="hint" style={{ marginTop: 8 }}>This run exported no model. Train a graph component (Components or Builder) to get weights, TorchScript and ONNX.</p> : (
+      {!meta ? <p className="hint" style={{ marginTop: 8 }}>This run exported no model. Train a graph component (from Components or the CLI) to get weights, TorchScript and ONNX.</p> : (
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', marginTop: 12 }}>
           <div>
             <div className="stat-title">Exports</div>

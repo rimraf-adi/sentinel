@@ -143,7 +143,7 @@ export function System({ hw }: { hw: Vitals | null }) {
           <div className="nav-title" style={{ padding: 0, margin: '22px 0 8px' }}>Running jobs</div>
           <div className="card" style={{ padding: 0 }}>
             <table><thead><tr><th>Job</th><th>PID</th><th>Processes</th><th>CPU (cores)</th><th>Memory</th><th>GPU memory</th><th>Disk read / write</th></tr></thead><tbody>
-              {hw.jobs.length === 0 && <tr><td colSpan={7} className="empty">No running jobs. Start one from Components or the Builder.</td></tr>}
+              {hw.jobs.length === 0 && <tr><td colSpan={7} className="empty">No running jobs. Start one from Components or the CLI.</td></tr>}
               {hw.jobs.map((j) => (
                 <tr key={j.job_id}><td><b>{j.name}</b></td><td className="mono">{j.stat.pid}</td><td className="mono">{j.stat.processes}</td>
                   <td className="mono">{(j.stat.cpu_percent / 100).toFixed(2)}</td><td className="mono">{mb(j.stat.rss_bytes)}</td>

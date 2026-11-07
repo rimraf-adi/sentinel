@@ -25,7 +25,7 @@ export function BlockNodeView({ id, data, selected }: NodeProps<BN>) {
         <div>
           {info.inputs.map((p) => (
             <div className="bport" key={p}>
-              <Handle type="target" position={Position.Left} id={p} />
+              <Handle type="target" position={Position.Left} id={p} isConnectable={false} />
               <span>{p}</span><span className="shape">{shapeText(srcShape(r?.inputs[p]))}</span>
             </div>
           ))}
@@ -33,7 +33,7 @@ export function BlockNodeView({ id, data, selected }: NodeProps<BN>) {
         <div>
           {info.outputs.map((p) => (
             <div className="bport out" key={p}>
-              <Handle type="source" position={Position.Right} id={p} />
+              <Handle type="source" position={Position.Right} id={p} isConnectable={false} />
               <span>{p}</span><span className="shape">{shapeText(r?.outputs[p])}</span>
             </div>
           ))}
@@ -47,7 +47,7 @@ export function InputNodeView({ data, selected }: NodeProps<InputNode>) {
   return (
     <div className={'bnode io' + (selected ? ' selected' : '')}>
       <div className="bnode-h"><b>input {data.name}</b></div>
-      <div className="bnode-b"><div /><div className="bport out"><Handle type="source" position={Position.Right} id="out" /><span className="shape">{shapeText(data.shape)}</span></div></div>
+      <div className="bnode-b"><div /><div className="bport out"><Handle type="source" position={Position.Right} id="out" isConnectable={false} /><span className="shape">{shapeText(data.shape)}</span></div></div>
     </div>
   );
 }
@@ -56,7 +56,7 @@ export function OutputNodeView({ data, selected }: NodeProps<OutputNode>) {
   return (
     <div className={'bnode io' + (selected ? ' selected' : '')}>
       <div className="bnode-h"><b>output {data.name}</b></div>
-      <div className="bnode-b"><div className="bport"><Handle type="target" position={Position.Left} id="in" /><span className="shape">logits</span></div><div /></div>
+      <div className="bnode-b"><div className="bport"><Handle type="target" position={Position.Left} id="in" isConnectable={false} /><span className="shape">logits</span></div><div /></div>
     </div>
   );
 }

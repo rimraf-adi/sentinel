@@ -1,21 +1,7 @@
-import { useEffect, useState } from 'react';
-import type { BlockInfo, NodeDesc, Training, ValidateOk } from '../api';
-import { DatasetPicker, SchemaEditor, taskOf, type Picked } from '../DatasetPicker';
-import { Field, fmtBytes, fmtCount } from '../ui';
-import { IDENT } from './convert';
-import { TrainingForm } from './TrainingForm';
+import type { BlockInfo, Component, NodeDesc, ValidateOk } from '../api';
+import { fmtBytes, fmtCount } from '../ui';
 import type { BNode } from './types';
 
-/** Text input that commits on blur/Enter so partial edits (e.g. JSON) don't thrash validation. */
-function Commit({ value, onCommit, mono }: { value: string; onCommit: (v: string) => void; mono?: boolean }) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  return <input className={mono ? 'mono' : ''} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onCommit(v)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />;
-}
-
-const parse = (s: string): unknown => { try { return JSON.parse(s); } catch { return s; } };
-const show = (v: unknown) => (v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-/** What a compound block is made of, recursively, with the shape on every inner node's first output. */
 function Inner({ nodes, order, depth }: { nodes: Record<string, NodeDesc>; order: string[]; depth: number }) {
   return (
     <>
@@ -38,111 +24,181 @@ function Inner({ nodes, order, depth }: { nodes: Record<string, NodeDesc>; order
   );
 }
 
-const sel = (opts: string[], cur: string, on: (v: string) => void) => (
-  <select value={cur} onChange={(e) => on(e.target.value)}>{opts.map((o) => <option key={o} value={o}>{o || '(none)'}</option>)}</select>
-);
-
 export interface InspectorProps {
   node: BNode | null;
   result: ValidateOk | null;
   blocks: Record<string, BlockInfo>;
-  siblings: BNode[];
-  training: Training | null;
-  setTraining: (t: Training | null) => void;
-  patchData: (id: string, patch: Record<string, unknown>) => void;
-  rename: (id: string, to: string) => boolean;
-  remove: () => void;
-  applyDataset: (d: { csv: string; features: string[]; target: string; loss: string; outputs: number }) => void;
+  component: Component | null;
 }
 
-export function Inspector(p: InspectorProps) {
-  const { node, blocks } = p;
-  const [picked, setPicked] = useState<Picked | null>(null);
-  const choose = (pk: Picked, features: string[], target: string) => {
-    const t = taskOf(pk.schema, target);
-    p.applyDataset({ csv: pk.path, features, target, loss: t.loss, outputs: t.outputs });
-  };
-  const del = <button className="btn sm danger" onClick={p.remove}>Delete</button>;
-
+export function Inspector({ node, result, blocks, component }: InspectorProps) {
   if (node?.type === 'input') {
+    const shape = result?.inputs[node.data.name];
     return (
-      <>
-        <h4>Graph input</h4>
-        <Field label="Name"><Commit value={node.data.name} onCommit={(v) => IDENT.test(v) && p.patchData(node.id, { name: v })} /></Field>
-        <Field label="Shape" hint='JSON, symbols like "B" allowed'><Commit mono value={JSON.stringify(node.data.shape)} onCommit={(v) => { const x = parse(v); if (Array.isArray(x)) p.patchData(node.id, { shape: x }); }} /></Field>
-        {del}
-      </>
+      <div className="inspector-panel">
+        <div className="eyebrow">GRAPH INPUT</div>
+        <h3 style={{ margin: '4px 0 12px' }}>{node.data.name}</h3>
+        <div className="kv">
+          <span>Port</span><b>in:{node.data.name}</b>
+          <span>Tensor Shape</span><b className="mono">[{node.data.shape.join(', ')}]</b>
+          {shape && <span>Inferred Shape</span>}
+          {shape && <b className="mono">[{shape.join(', ')}]</b>}
+        </div>
+        <p className="hint" style={{ marginTop: 12 }}>
+          Entrypoint receiving training batch or inference features from the dataset.
+        </p>
+      </div>
     );
   }
+
   if (node?.type === 'output') {
     return (
-      <>
-        <h4>Graph output</h4>
-        <Field label="Name"><Commit value={node.data.name} onCommit={(v) => IDENT.test(v) && p.patchData(node.id, { name: v })} /></Field>
-        <p className="hint">Wire a block's output port to this node.</p>
-        {del}
-      </>
+      <div className="inspector-panel">
+        <div className="eyebrow">GRAPH OUTPUT</div>
+        <h3 style={{ margin: '4px 0 12px' }}>{node.data.name}</h3>
+        <div className="kv">
+          <span>Port</span><b>out:{node.data.name}</b>
+          <span>Role</span><b>Predictions / Logits</b>
+        </div>
+        <p className="hint" style={{ marginTop: 12 }}>
+          Terminal output node evaluated against dataset target during training and inference.
+        </p>
+      </div>
     );
   }
+
   if (node?.type === 'block') {
     const b = blocks[node.data.block];
-    const sharable = p.siblings.filter((s) => s.type === 'block' && s.id !== node.id && s.data.block === node.data.block && !s.data.share).map((s) => s.id);
-    const setParam = (k: string, v: unknown) => p.patchData(node.id, { params: { ...node.data.params, [k]: v } });
+    const r = result?.nodes[node.id];
     return (
-      <>
-        <h4>{node.data.block} <span className={'tier-tag ' + (b?.tier ?? '')}>{b?.tier}</span></h4>
-        <p className="hint">{b?.description}</p>
-        {p.result?.nodes[node.id] && (
-          <div className="kv" style={{ marginBottom: 10 }}>
-            <span>Parameters</span><b>{p.result.nodes[node.id].shared ? 'shared (counted once)' : `${p.result.nodes[node.id].params.toLocaleString()} · ${fmtBytes(p.result.nodes[node.id].params * 4)}`}</b>
-            <span>MACs / sample</span><b>{p.result.nodes[node.id].macs === null ? 'n/a' : fmtCount(p.result.nodes[node.id].macs!)}</b>
+      <div className="inspector-panel">
+        <div className="row sp" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <div className="eyebrow">{b?.family?.toUpperCase() ?? 'BLOCK'}</div>
+            <h3 style={{ margin: '4px 0' }}>{node.id}</h3>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{node.data.block}</span>
+          </div>
+          <span className={'chip ' + (b?.tier === 'compound' ? 'on' : '')}>{b?.tier ?? 'fundamental'}</span>
+        </div>
+
+        <p className="hint" style={{ margin: '8px 0 14px' }}>{b?.description}</p>
+
+        {r && (
+          <div className="kv" style={{ marginBottom: 14 }}>
+            <span>Learnable Params</span>
+            <b>{r.shared ? 'shared (counted once)' : `${r.params.toLocaleString()} · ${fmtBytes(r.params * 4)}`}</b>
+            <span>Compute / Sample</span>
+            <b>{r.macs === null ? 'n/a' : `${fmtCount(r.macs)} MACs`}</b>
+            {node.data.share && <span>Weights Reused From</span>}
+            {node.data.share && <b className="mono">{node.data.share}</b>}
           </div>
         )}
+
+        <div className="stat-title" style={{ marginTop: 12, marginBottom: 6 }}>PORTS & SHAPES</div>
+        <div className="kv" style={{ marginBottom: 14 }}>
+          {b?.inputs.map((p) => {
+            const inKey = r?.inputs[p];
+            const inShape = inKey ? (result?.inputs[inKey] ?? result?.nodes[inKey.split('.')[0]]?.outputs[inKey.split('.')[1]]) : null;
+            return (
+              <div key={`in-${p}`} style={{ display: 'contents' }}>
+                <span>in: {p}</span>
+                <b className="mono">{inShape ? `[${inShape.join(', ')}]` : '—'}</b>
+              </div>
+            );
+          })}
+          {b?.outputs.map((p) => {
+            const outShape = r?.outputs[p];
+            return (
+              <div key={`out-${p}`} style={{ display: 'contents' }}>
+                <span>out: {p}</span>
+                <b className="mono">{outShape ? `[${outShape.join(', ')}]` : '—'}</b>
+              </div>
+            );
+          })}
+        </div>
+
+        {Object.keys(node.data.params).length > 0 && (
+          <>
+            <div className="stat-title" style={{ marginTop: 12, marginBottom: 6 }}>LAYER HYPERPARAMETERS</div>
+            <div className="kv" style={{ marginBottom: 14 }}>
+              {Object.entries(node.data.params).map(([k, v]) => (
+                <div key={k} style={{ display: 'contents' }}>
+                  <span>{k}</span>
+                  <b className="mono">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</b>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {b?.tier === 'compound' && (
-          <div className="inner">
-            <div className="stat-title">Built from</div>
+          <div className="inner" style={{ marginTop: 12 }}>
+            <div className="stat-title">NESTED COMPOUND ARCHITECTURE</div>
             <div className="chips" style={{ margin: '6px 0 8px' }}>{b.uses.map((u) => <span className="chip" key={u}>{u}</span>)}</div>
-            {p.result?.nodes[node.id]?.inner
-              ? <Inner nodes={p.result.nodes[node.id].inner!.nodes} order={p.result.nodes[node.id].inner!.order} depth={0} />
-              : <p className="hint">Connect inputs and fix any errors to see the inner graph with live shapes.</p>}
+            {r?.inner
+              ? <Inner nodes={r.inner.nodes} order={r.inner.order} depth={0} />
+              : <p className="hint">Inner graph hierarchy compiled automatically.</p>}
           </div>
         )}
-        <Field label="Node id"><Commit value={node.id} onCommit={(v) => p.rename(node.id, v)} /></Field>
-        {b?.params.map((bp) => {
-          const v = node.data.params[bp.name] !== undefined ? node.data.params[bp.name] : bp.default;
-          const label = bp.name + (bp.required ? ' *' : '');
-          if (typeof bp.default === 'boolean')
-            return <Field key={bp.name} label={label} hint={bp.help}><input type="checkbox" checked={!!v} onChange={(e) => setParam(bp.name, e.target.checked)} /></Field>;
-          if ((bp.options?.length ?? 0) > 0)
-            return <Field key={bp.name} label={label} hint={bp.help}>{sel(bp.options ?? [], String(v), (x) => setParam(bp.name, x))}</Field>;
-          // an empty optional number means "use the default" (null)
-          return <Field key={bp.name} label={label} hint={bp.help}><Commit value={show(v)} onCommit={(s) => setParam(bp.name, s.trim() === '' && bp.default === null ? null : parse(s))} /></Field>;
-        })}
-        {sharable.length > 0 && <Field label="Share weights with">{sel(['', ...sharable], node.data.share ?? '', (x) => p.patchData(node.id, { share: x || null }))}</Field>}
-        {del}
-      </>
+      </div>
     );
   }
-  const t = p.training;
-  const set = (patch: Partial<Training>) => t && p.setTraining({ ...t, ...patch });
+
+  // No node selected: show Component & Model overview
   return (
-    <>
-      <h4>Training</h4>
-      {!t ? (
-        <>
-          <p className="hint">Add a training section to run this graph on a CSV.</p>
-          <button className="btn sm" onClick={() => p.setTraining({ loss: 'cross_entropy', optimizer: 'adam', lr: 0.01, epochs: 200, data: { csv: 'data/demo.csv', features: ['x1', 'x2'], target: 'label' } })}>Add training</button>
-        </>
-      ) : (
-        <>
-          <DatasetPicker onPick={(pk) => { setPicked(pk); const sg = pk.schema.suggestion; choose(pk, sg?.features ?? [], sg?.target ?? pk.schema.columns[pk.schema.columns.length - 1]?.name ?? ''); }} />
-          {picked && <SchemaEditor schema={picked.schema} features={t.data.features} target={t.data.target ?? ''} onChange={(f, tg) => choose(picked, f, tg)} />}
-          <p className="hint gap-t">Choosing a dataset also sets the input width and the final linear block's size.</p>
-          <TrainingForm t={t} set={set} nodeIds={p.siblings.filter((n) => n.type === 'block').map((n) => n.id)} />
-          <button className="btn sm danger" onClick={() => p.setTraining(null)}>Remove training</button>
-        </>
+    <div className="inspector-panel">
+      <div className="eyebrow">DAG ARCHITECTURE OVERVIEW</div>
+      <h3 style={{ margin: '4px 0' }}>{component?.name ?? 'Model Graph'}</h3>
+      {component && <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{component.component_id}</span>}
+      {component?.description && <p className="hint" style={{ margin: '8px 0 14px' }}>{component.description}</p>}
+
+      {result?.stats && (
+        <div className="kv" style={{ marginBottom: 14 }}>
+          <span>Total Parameters</span>
+          <b>{fmtCount(result.stats.params)} ({fmtBytes(result.stats.bytes_fp32)})</b>
+          <span>Compute / Sample</span>
+          <b>{result.stats.macs === null ? 'n/a' : `${fmtCount(result.stats.macs)} MACs`}</b>
+          <span>Blocks</span>
+          <b>{result.stats.blocks} fundamental · {result.stats.compounds} compound</b>
+          <span>Nesting Depth</span>
+          <b>{result.stats.depth} level{result.stats.depth === 1 ? '' : 's'}</b>
+        </div>
       )}
-      <p className="hint gap-t">Drag blocks from the palette, wire output ports to input ports. Click a wire and press Delete to remove it. Ctrl/Cmd+Z undoes.</p>
-    </>
+
+      {result?.stats?.by_block && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="stat-title" style={{ marginBottom: 6 }}>WEIGHTS BREAKDOWN</div>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            {Object.entries(result.stats.by_block)
+              .filter(([, v]) => v > 0)
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, v]) => (
+                <span key={k} className="chip">
+                  {k}: {Math.round((v / Math.max(1, result.stats!.params)) * 100)}%
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {result?.order && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="stat-title" style={{ marginBottom: 6 }}>EXECUTION ORDER ({result.order.length} STEPS)</div>
+          <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6, maxHeight: 180, overflowY: 'auto' }}>
+            {result.order.map((id, i) => (
+              <div key={id} style={{ display: 'flex', gap: 8 }}>
+                <span style={{ color: 'var(--text-muted)', width: 20 }}>{i + 1}.</span>
+                <b>{id}</b>
+                <span style={{ color: 'var(--text-muted)' }}>({result.nodes[id]?.block})</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="hint" style={{ marginTop: 16 }}>
+        💡 Click any node on the DAG canvas to inspect its tensor shapes and parameters.
+      </p>
+    </div>
   );
 }

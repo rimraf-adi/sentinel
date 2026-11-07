@@ -4,8 +4,8 @@ import { Icon, type IconName } from './icons';
 
 interface Item { id: string; group: string; label: string; hint?: string; icon: IconName; run: () => void }
 
-export function CommandPalette({ onClose, go, openInBuilder, tabs }: {
-  onClose: () => void; go: (t: string) => void; openInBuilder: (id: string) => void; tabs: { id: string; label: string }[];
+export function CommandPalette({ onClose, go, openInVisualizer, tabs }: {
+  onClose: () => void; go: (t: string) => void; openInVisualizer: (id: string) => void; tabs: { id: string; label: string }[];
 }) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -17,12 +17,11 @@ export function CommandPalette({ onClose, go, openInBuilder, tabs }: {
     const done = (f: () => void) => () => { onClose(); f(); };
     return [
       ...tabs.map((t) => ({ id: 'go-' + t.id, group: 'Go to', label: t.label, icon: t.id as IconName, run: done(() => go(t.id)) })),
-      { id: 'new', group: 'Actions', label: 'New graph in the Builder', hint: 'start from a blank canvas', icon: 'plus' as IconName, run: done(() => openInBuilder('__new__')) },
       { id: 'compare', group: 'Actions', label: 'Compare experiments', hint: 'overlay metric curves', icon: 'chart' as IconName, run: done(() => go('experiments')) },
       { id: 'vitals', group: 'Actions', label: 'Watch system vitals', hint: 'CPU, GPU, network, disks', icon: 'system' as IconName, run: done(() => go('system')) },
-      ...components.filter((c) => c.graph).map((c) => ({ id: 'open-' + c.component_id, group: 'Open in Builder', label: c.name, hint: c.component_id, icon: 'builder' as IconName, run: done(() => openInBuilder(c.component_id)) })),
+      ...components.filter((c) => c.graph).map((c) => ({ id: 'open-' + c.component_id, group: 'View in DAG Visualizer', label: c.name, hint: c.component_id, icon: 'visualizer' as IconName, run: done(() => openInVisualizer(c.component_id)) })),
     ];
-  }, [components, tabs, go, openInBuilder, onClose]);
+  }, [components, tabs, go, openInVisualizer, onClose]);
 
   const shown = useMemo(() => {
     const toks = q.toLowerCase().split(/\s+/).filter(Boolean);

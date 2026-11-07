@@ -71,7 +71,7 @@ function Configure({ c, onClose, refresh, go }: { c: Component; onClose: () => v
 const DOMAIN_COLOR: Record<string, string> = { tabular: '#5b9bff', sequence: '#fbbf24', vision: '#f472b6', graph: '#22d3ee', llm: '#34d399', custom: '#94a3b8' };
 const colorOf = (d: string) => DOMAIN_COLOR[d] ?? '#94a3b8';
 
-export function Components({ refresh, go, openInBuilder }: { refresh: () => void; go: (t: string) => void; openInBuilder: (id: string) => void }) {
+export function Components({ refresh, go, openInVisualizer }: { refresh: () => void; go: (t: string) => void; openInVisualizer: (id: string) => void }) {
   const { data } = usePoll(api.components, 15000);
   const [sel, setSel] = useState<Component | null>(null);
   const [q, setQ] = useState('');
@@ -81,9 +81,13 @@ export function Components({ refresh, go, openInBuilder }: { refresh: () => void
     && `${c.name} ${c.component_id} ${c.description}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      <div className="page-header"><div><div className="eyebrow">COMPONENT REGISTRY</div><h1 className="page-title">Components</h1>
-        <p className="page-sub">Readymade architectures with editable hyperparameters. Open any graph component in the Builder.</p></div>
-        <button className="btn primary" onClick={() => openInBuilder('__new__')}><Icon name="plus" size={14} /> New component</button></div>
+      <div className="page-header">
+        <div>
+          <div className="eyebrow">COMPONENT REGISTRY</div>
+          <h1 className="page-title">Components</h1>
+          <p className="page-sub">Declarative model architectures and experiment recipes. Inspect live topologies in the DAG Visualizer.</p>
+        </div>
+      </div>
       <div className="filterbar">
         <input className="input" type="search" placeholder="Search components…" aria-label="Search components" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="chips" role="group" aria-label="Filter by domain">
@@ -110,7 +114,7 @@ export function Components({ refresh, go, openInBuilder }: { refresh: () => void
             <div className="row sp">
               <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{Object.keys(c.parameters).length} hyperparameters{c.stats ? ` · ${fmtCount(c.stats.params)} params (${fmtBytes(c.stats.bytes_fp32)})` : ''}</span>
               <div className="row">
-                {c.graph ? <button className="btn sm" onClick={() => openInBuilder(c.component_id)}>Open in Builder</button> : null}
+                {c.graph ? <button className="btn sm" onClick={() => openInVisualizer(c.component_id)}>View DAG</button> : null}
                 <button className="btn sm primary" onClick={() => setSel(c)}>Configure</button>
               </div>
             </div>

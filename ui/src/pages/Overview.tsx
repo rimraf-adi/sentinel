@@ -9,8 +9,8 @@ const greeting = () => { const h = new Date().getHours(); return h < 5 ? 'Still 
 const rate = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB/s` : b >= 1e3 ? `${(b / 1e3).toFixed(0)} KB/s` : `${b.toFixed(0)} B/s`);
 const metric = (v: number | undefined) => (v === undefined ? '' : Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(1) : (+v.toPrecision(3)).toString());
 
-export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
-  repo: RepoStatus | null; jobs: JobRecord[]; hw: Vitals | null; onRepoChanged: () => void; go: (t: string) => void; openInBuilder: (id: string) => void;
+export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
+  repo: RepoStatus | null; jobs: JobRecord[]; hw: Vitals | null; onRepoChanged: () => void; go: (t: string) => void;
 }) {
   const toast = useToast();
   const hist = usePoll(api.vitalsHistory, 3000);
@@ -33,7 +33,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
           </div>
           <div className="row">
             <button className="btn" onClick={() => go('runs')}><Icon name="runs" size={14} /> Runs{running.length > 0 && ` · ${running.length} live`}</button>
-            <button className="btn primary" onClick={() => openInBuilder('__new__')}><Icon name="plus" size={14} /> New component</button>
+            <button className="btn primary" onClick={() => go('components')}><Icon name="components" size={14} /> Components</button>
           </div>
         </div>
       </section>
@@ -76,7 +76,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
         </div>
         <div className="card" style={{ padding: 0 }}>
           <div className="row sp" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}><b>Recent jobs</b><button className="btn sm" onClick={() => go('runs')}>All runs →</button></div>
-          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Compose a component in the Builder and press Run." />
+          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a training run from Components, an agent, or the CLI." />
             : <table><tbody>{[...jobs].reverse().slice(0, 5).map((j) => (
               <tr key={j.spec.id}><td>{j.spec.name}</td><td><StatusPill status={j.status} /></td><td style={{ color: 'var(--text-muted)' }}>{fmtTime(j.started_at)}</td></tr>))}</tbody></table>}
         </div>
