@@ -243,6 +243,25 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body?: unknown) =>
   req<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
 
+export interface LayerFlowData {
+  name: string;
+  activation_mean: number;
+  activation_std: number;
+  dead_pct: number;
+  gradient_norm: number;
+  gradient_mean: number;
+  status: 'healthy' | 'vanishing' | 'exploding' | 'dead';
+  shape: (number | string)[];
+}
+
+export interface FlowTelemetry {
+  step: number;
+  timestamp: number;
+  vanishing_ratio: number;
+  exploding: boolean;
+  layers: LayerFlowData[];
+}
+
 export const api = {
   jobs: () => req<JobRecord[]>('/api/jobs'),
   logs: (id: string) => req<{ logs: string[] }>(`/api/jobs/${id}/logs`),
@@ -289,4 +308,5 @@ export const api = {
   compose: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown>; model_only?: boolean }) =>
     post<{ ok: true; code: string }>('/api/graph/compose', b),
   runGraph: (b: { graph?: GraphSpec; component_id?: string; overrides?: Record<string, unknown> }) => post<JobRecord>('/api/graph/run', b),
+  flowLive: () => req<FlowTelemetry>('/api/flow/live').catch(() => null),
 };

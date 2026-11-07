@@ -258,3 +258,129 @@ def get_dataset_path(name: str) -> Optional[str]:
         return str(Path(name).resolve())
 
     return None
+
+
+class ModelFlowWatcher:
+    """Attaches forward and backward hooks to PyTorch modules to monitor activations and gradients."""
+    def __init__(self, model, log_freq: int = 10, out_dir: str = ".sentinel"):
+        self.model = model
+        self.log_freq = log_freq
+        self.out_dir = Path(out_dir)
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.step = 0
+        self.activations: Dict[str, Any] = {}
+        self.gradients: Dict[str, Any] = {}
+        self.hooks: list = []
+        self._register_hooks()
+
+    def _register_hooks(self):
+        try:
+            import torch
+            import torch.nn as nn
+        except ImportError:
+            return
+
+        for name, module in self.model.named_modules():
+            if list(module.children()):
+                continue
+            has_params = any(p.requires_grad for p in module.parameters())
+            if not has_params and not isinstance(module, (nn.ReLU, nn.GELU, nn.SiLU)):
+                continue
+
+            layer_name = name or module.__class__.__name__
+
+            def make_fwd_hook(l_name):
+                def hook(mod, inp, out):
+                    if not getattr(self.model, 'training', True):
+                        return
+                    with torch.no_grad():
+                        t = out if isinstance(out, torch.Tensor) else out[0] if isinstance(out, (list, tuple)) and len(out) > 0 and isinstance(out[0], torch.Tensor) else None
+                        if t is not None:
+                            val = t.detach()
+                            mean_act = float(val.abs().mean().item())
+                            std_act = float(val.std().item()) if val.numel() > 1 else 0.0
+                            dead_pct = float((val <= 0).float().mean().item()) * 100.0 if val.numel() > 0 else 0.0
+                            self.activations[l_name] = {
+                                "mean": mean_act,
+                                "std": std_act,
+                                "dead_pct": dead_pct,
+                                "shape": list(val.shape),
+                            }
+                return hook
+
+            def make_bwd_hook(l_name):
+                def hook(mod, grad_input, grad_output):
+                    if not getattr(self.model, 'training', True):
+                        return
+                    with torch.no_grad():
+                        g = grad_output[0] if grad_output and isinstance(grad_output[0], torch.Tensor) else None
+                        if g is not None:
+                            norm = float(g.detach().norm(2).item())
+                            mean_g = float(g.detach().abs().mean().item())
+                            self.gradients[l_name] = {
+                                "norm": norm,
+                                "mean": mean_g,
+                            }
+                        self._maybe_flush()
+                return hook
+
+            self.hooks.append(module.register_forward_hook(make_fwd_hook(layer_name)))
+            self.hooks.append(module.register_full_backward_hook(make_bwd_hook(layer_name)))
+
+    def _maybe_flush(self):
+        self.step += 1
+        if self.step % self.log_freq != 0:
+            return
+        layers_data = []
+        grad_norms = []
+        for l_name, act_data in self.activations.items():
+            g_data = self.gradients.get(l_name, {"norm": 0.0, "mean": 0.0})
+            norm = g_data["norm"]
+            grad_norms.append(norm)
+            status = "healthy"
+            if norm < 1e-5:
+                status = "vanishing"
+            elif norm > 10.0:
+                status = "exploding"
+            elif act_data.get("dead_pct", 0) > 80:
+                status = "dead"
+
+            layers_data.append({
+                "name": l_name,
+                "activation_mean": act_data["mean"],
+                "activation_std": act_data["std"],
+                "dead_pct": act_data["dead_pct"],
+                "gradient_norm": norm,
+                "gradient_mean": g_data["mean"],
+                "status": status,
+                "shape": act_data.get("shape", []),
+            })
+
+        vanishing_ratio = (grad_norms[0] / max(grad_norms[-1], 1e-8)) if len(grad_norms) >= 2 else 1.0
+        payload = {
+            "step": self.step,
+            "timestamp": time.time(),
+            "vanishing_ratio": vanishing_ratio,
+            "exploding": any(n > 10.0 for n in grad_norms),
+            "layers": layers_data,
+        }
+        flow_file = self.out_dir / "live_flow.json"
+        try:
+            flow_file.write_text(json.dumps(payload))
+        except Exception:
+            pass
+
+    def remove(self):
+        for h in self.hooks:
+            try:
+                h.remove()
+            except Exception:
+                pass
+        self.hooks.clear()
+
+
+@_safe_call(default_return=None)
+def watch_model(model, log_freq: int = 10, out_dir: str = ".sentinel") -> Optional[ModelFlowWatcher]:
+    """Attach forward and backward gradient/activation hooks for live telemetry in Sentinel."""
+    return ModelFlowWatcher(model, log_freq=log_freq, out_dir=out_dir)
+

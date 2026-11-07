@@ -13,10 +13,12 @@ import { Components } from './pages/Components';
 import { Builder as Visualizer } from './builder/Builder';
 import { Datasets } from './pages/Datasets';
 import { System } from './pages/System';
+import { Flow } from './pages/Flow';
 
 const TABS = [
   { id: 'overview', label: 'Overview', group: 'Observability' },
   { id: 'runs', label: 'Runs', group: 'Observability' },
+  { id: 'flow', label: 'Gradient Flow', group: 'Observability' },
   { id: 'experiments', label: 'Experiments', group: 'Observability' },
   { id: 'sweeps', label: 'Sweeps', group: 'Observability' },
   { id: 'system', label: 'System', group: 'Observability' },
@@ -136,9 +138,10 @@ export function App() {
               <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
             </div>
           </header>
-          <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' ? ' fill' : '')}>
+          <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' || tab === 'flow' ? ' fill' : '')}>
             {tab === 'overview' && <Overview repo={r ?? null} jobs={jobs.data ?? []} hw={hw} onRepoChanged={repo.refresh} go={go} />}
             {tab === 'runs' && <Runs jobs={jobs.data ?? []} refresh={jobs.refresh} go={go} />}
+            {tab === 'flow' && <Flow go={go} />}
             {tab === 'experiments' && <Experiments go={go} />}
             {tab === 'sweeps' && <Sweeps refresh={jobs.refresh} go={go} />}
             {tab === 'system' && <System hw={hw} />}

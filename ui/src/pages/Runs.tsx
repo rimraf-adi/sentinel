@@ -50,7 +50,8 @@ export function Runs({ jobs, refresh, go }: { jobs: JobRecord[]; refresh: () => 
                 <td className="mono" style={{ fontSize: 11 }}>{j.spec.component_id ?? '—'}</td>
                 <td style={{ color: 'var(--text-secondary)' }}>{fmtTime(j.started_at)}</td>
                 <td className="mono">{j.exit_code ?? '—'}</td>
-                <td><div className="row" style={{ justifyContent: 'flex-end' }}>
+                <td><div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
+                  <button className="btn sm" onClick={() => go('flow')} title="Inspect Gradient &amp; Activation Flow">Flow</button>
                   <button className="btn sm" onClick={() => setOpen(j.spec.id)}>Logs</button>
                   {j.status === 'running' && <button className="btn sm danger" onClick={() => stop(j.spec.id)}>Stop</button>}
                 </div></td>
