@@ -25,6 +25,11 @@ export function Explain() {
             initial[a.feature] = a.value;
           });
           setInputValues((prev) => (Object.keys(prev).length === 0 ? initial : prev));
+        } else if (active && runs.data && runs.data.length > 0) {
+          const first = runs.data[0];
+          if (first) {
+            setSelectedRun(first.run_id);
+          }
         }
       } else {
         setLoading(true);

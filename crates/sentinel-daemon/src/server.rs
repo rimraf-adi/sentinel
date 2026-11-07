@@ -1026,7 +1026,9 @@ async fn live_explain() -> Result<Json<serde_json::Value>, ApiError> {
 }
 
 async fn get_run_explain(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json::Value>, ApiError> {
-    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &id)
+    let root = mlruns_root();
+    let full_id = sentinel_core::tracking::resolve_run_id(&root, &id).unwrap_or(id);
+    let dir = sentinel_core::tracking::run_dir(&root, &full_id)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
     let art = dir.join("artifacts").join("xai_explanation.json");
     if art.exists() {
@@ -1049,10 +1051,10 @@ async fn get_run_explain(AxumPath(id): AxumPath<String>) -> Result<Json<serde_js
 }
 
 async fn explain_run(Json(req): Json<ExplainRequest>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = mlruns_root();
     let run_id = match req.run_id {
-        Some(id) => id,
+        Some(id) => sentinel_core::tracking::resolve_run_id(&root, &id).unwrap_or(id),
         None => {
-            let root = mlruns_root();
             sentinel_core::tracking::list_runs(&root)
                 .into_iter()
                 .find(|r| {
@@ -1064,7 +1066,7 @@ async fn explain_run(Json(req): Json<ExplainRequest>) -> Result<Json<serde_json:
                 .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "no trained models found to explain"))?
         }
     };
-    let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &run_id)
+    let dir = sentinel_core::tracking::run_dir(&root, &run_id)
         .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "unknown run"))?;
     let inputs = req.inputs;
     let result = tokio::task::spawn_blocking(move || {
