@@ -84,6 +84,9 @@ pub struct Component {
     /// A generative adversarial network: two graphs (`generator`, `discriminator`) and a `training` recipe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gan: Option<serde_yaml::Value>,
+    /// Origin of this component: "builtin", "user", or "project"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// What a component builds into: one graph, or a GAN's pair.
@@ -338,7 +341,8 @@ smoke_test:
   training.limit_val_batches: 2
   device: "cpu"
 "#;
-        if let Ok(t) = Component::from_yaml(vision_yaml) {
+        if let Ok(mut t) = Component::from_yaml(vision_yaml) {
+            t.origin = Some("builtin".to_string());
             self.components.insert(t.component_id.clone(), t);
         }
 
@@ -359,7 +363,8 @@ locked:
 smoke_test:
   command: "python -c 'print(\"smoke test passed\")'"
 "#;
-        if let Ok(t) = Component::from_yaml(custom_runner_yaml) {
+        if let Ok(mut t) = Component::from_yaml(custom_runner_yaml) {
+            t.origin = Some("builtin".to_string());
             self.components.insert(t.component_id.clone(), t);
         }
     }
@@ -381,13 +386,37 @@ smoke_test:
             include_str!("../../../components/graph/gcn-classifier.yaml"),
         ];
         for y in SHIPPED {
-            let c = Component::from_yaml(y).expect("shipped graph component must be valid");
+            let mut c = Component::from_yaml(y).expect("shipped graph component must be valid");
+            c.origin = Some("builtin".to_string());
             self.components.insert(c.component_id.clone(), c);
         }
     }
 
-    /// Load custom components from a filesystem directory.
-    pub fn load_from_dir(&mut self, dir: &Path) -> Result<usize, ComponentError> {
+    /// Directory where user-global templates are stored (~/.sentinel/templates or $SENTINEL_TEMPLATES_DIR).
+    pub fn user_templates_dir() -> std::path::PathBuf {
+        if let Ok(custom) = std::env::var("SENTINEL_TEMPLATES_DIR") {
+            if !custom.trim().is_empty() {
+                return std::path::PathBuf::from(custom);
+            }
+        }
+        crate::platform::home_dir()
+            .map(|h| h.join(".sentinel").join("templates"))
+            .unwrap_or_else(|| std::path::PathBuf::from(".sentinel/templates"))
+    }
+
+    /// Load user-global templates from ~/.sentinel/templates/
+    pub fn load_user_templates(&mut self) -> Result<usize, ComponentError> {
+        let dir = Self::user_templates_dir();
+        self.load_from_dir_with_origin(&dir, Some("user"))
+    }
+
+    /// Load project-local components from <project_dir>/components
+    pub fn load_project_components(&mut self, project_dir: &Path) -> Result<usize, ComponentError> {
+        self.load_from_dir_with_origin(&project_dir.join("components"), Some("project"))
+    }
+
+    /// Load custom components from a filesystem directory with an explicit origin tag.
+    pub fn load_from_dir_with_origin(&mut self, dir: &Path, origin: Option<&str>) -> Result<usize, ComponentError> {
         if !dir.exists() || !dir.is_dir() {
             return Ok(0);
         }
@@ -400,18 +429,41 @@ smoke_test:
                 if let Some(ext) = path.extension() {
                     if ext == "yaml" || ext == "yml" {
                         let content = std::fs::read_to_string(&path)?;
-                        if let Ok(t) = Component::from_yaml(&content) {
+                        if let Ok(mut t) = Component::from_yaml(&content) {
+                            // Shipped/built-in components cannot be shadowed by external files
+                            if let Some(existing) = self.components.get(&t.component_id) {
+                                if existing.origin.as_deref() == Some("builtin") {
+                                    continue;
+                                }
+                            }
+                            t.origin = origin.map(|s| s.to_string());
                             self.components.insert(t.component_id.clone(), t);
                             count += 1;
                         }
                     }
                 }
             } else if path.is_dir() {
-                // Recursively check subdirectories (e.g. components/custom/)
-                count += self.load_from_dir(&path)?;
+                // Recursively check subdirectories (e.g. components/custom/ or templates/tabular/)
+                count += self.load_from_dir_with_origin(&path, origin)?;
             }
         }
         Ok(count)
+    }
+
+    /// Load custom components from a filesystem directory (defaults to "project" origin).
+    pub fn load_from_dir(&mut self, dir: &Path) -> Result<usize, ComponentError> {
+        self.load_from_dir_with_origin(dir, Some("project"))
+    }
+
+    /// Construct a full 3-tier registry:
+    /// 1. Built-in catalog (compiled into binary)
+    /// 2. User-global templates (~/.sentinel/templates/)
+    /// 3. Project-local components (<project_dir>/components/)
+    pub fn full(project_dir: &Path) -> Self {
+        let mut registry = Self::new();
+        let _ = registry.load_user_templates();
+        let _ = registry.load_project_components(project_dir);
+        registry
     }
 
     pub fn get(&self, component_id: &str) -> Option<&Component> {
@@ -467,6 +519,8 @@ smoke_test:
                 merged.graph = component.graph.clone();
             }
 
+            merged.origin = component.origin.clone();
+
             Ok(merged)
         } else {
             Ok(component.clone())
@@ -496,6 +550,7 @@ smoke_test:
             smoke_test: HashMap::new(),
             graph: None,
             gan: None,
+            origin: None,
         };
 
         starter.parameters.insert(
@@ -535,6 +590,7 @@ smoke_test:
             smoke_test: HashMap::new(),
             graph: None,
             gan: None,
+            origin: None,
         };
 
         for (k, v) in &resolved_config.values {
@@ -631,5 +687,98 @@ mod tests {
         let parsed = Component::from_yaml(&yaml).expect("parse frozen component");
         assert_eq!(parsed.component_id, "custom/winning-sweep-run@v1");
         assert!(parsed.locked.contains_key("training.lr"));
+    }
+
+    #[test]
+    fn test_three_tier_template_discovery_and_shadowing() {
+        let tmp = std::env::temp_dir().join(format!("sentinel_tmpl_test_{}", uuid::Uuid::new_v4()));
+        let user_dir = tmp.join("user_templates");
+        let proj_dir = tmp.join("project");
+        std::fs::create_dir_all(&user_dir).unwrap();
+        std::fs::create_dir_all(proj_dir.join("components")).unwrap();
+
+        // 1. User template trying to shadow a built-in
+        let bad_user_yaml = r#"
+schema_version: "1.0"
+component_id: "vision/image-classification@v1"
+name: "Faked Image Classifier"
+description: "Should not shadow"
+domain: "vision"
+defaults: []
+parameters: {}
+locked: {}
+"#;
+        std::fs::write(user_dir.join("bad.yaml"), bad_user_yaml).unwrap();
+
+        // 2. Legitimate user template
+        let user_yaml = r#"
+schema_version: "1.0"
+component_id: "tabular/shared-baseline@v1"
+name: "Shared Baseline"
+description: "User template"
+domain: "tabular"
+defaults: []
+parameters: {}
+locked: {}
+"#;
+        std::fs::write(user_dir.join("shared.yaml"), user_yaml).unwrap();
+
+        // 3. Project component that overrides the user template
+        let proj_override_yaml = r#"
+schema_version: "1.0"
+component_id: "tabular/shared-baseline@v1"
+name: "Project Specific Override"
+description: "Pinned project version"
+domain: "tabular"
+defaults: []
+parameters: {}
+locked: {}
+"#;
+        std::fs::write(proj_dir.join("components").join("override.yaml"), proj_override_yaml).unwrap();
+
+        // 4. Project-only component
+        let proj_yaml = r#"
+schema_version: "1.0"
+component_id: "custom/local-only@v1"
+name: "Local Only"
+description: "Project only"
+domain: "custom"
+defaults: []
+parameters: {}
+locked: {}
+"#;
+        std::fs::write(proj_dir.join("components").join("local.yaml"), proj_yaml).unwrap();
+
+        let mut registry = ComponentRegistry::new();
+        // Builtin origin check
+        let builtin = registry.get("vision/image-classification@v1").unwrap();
+        assert_eq!(builtin.origin.as_deref(), Some("builtin"));
+
+        // Load user templates
+        let user_count = registry.load_from_dir_with_origin(&user_dir, Some("user")).unwrap();
+        // bad.yaml was ignored because it matches a builtin
+        assert_eq!(user_count, 1);
+        let builtin_still = registry.get("vision/image-classification@v1").unwrap();
+        assert_eq!(builtin_still.name, "Image Classifier (AMP + Cosine)");
+        assert_eq!(builtin_still.origin.as_deref(), Some("builtin"));
+
+        let user_tmpl = registry.get("tabular/shared-baseline@v1").unwrap();
+        assert_eq!(user_tmpl.name, "Shared Baseline");
+        assert_eq!(user_tmpl.origin.as_deref(), Some("user"));
+
+        // Load project components
+        let proj_count = registry.load_project_components(&proj_dir).unwrap();
+        assert_eq!(proj_count, 2);
+
+        // Project component overrode the user template!
+        let overrode = registry.get("tabular/shared-baseline@v1").unwrap();
+        assert_eq!(overrode.name, "Project Specific Override");
+        assert_eq!(overrode.origin.as_deref(), Some("project"));
+
+        let local = registry.get("custom/local-only@v1").unwrap();
+        assert_eq!(local.name, "Local Only");
+        assert_eq!(local.origin.as_deref(), Some("project"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

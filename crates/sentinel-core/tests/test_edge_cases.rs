@@ -150,6 +150,7 @@ fn test_param_type_validations() {
         smoke_test: HashMap::new(),
         graph: None,
         gan: None,
+        origin: None,
     };
 
     // Valid overrides

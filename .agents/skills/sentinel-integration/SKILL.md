@@ -52,11 +52,26 @@ curl -s http://localhost:2512/api/health || {
 Before starting a run, check the component catalog and validate parameter ranges:
 
 ```bash
-# List available components
+# List available components (shows [built-in], [user template], and [project] badges)
 sentinel component list
 
 # Validate component parameters and locked fields
 sentinel component check components/vision/image-classification.yaml
+```
+
+### 1b. Managing Custom Templates (3-Tier Discovery)
+
+Sentinel discovers templates through a 3-tier hierarchy:
+1. **Built-in:** Compiled into binary (immutable; cannot be shadowed).
+2. **User-Global (`~/.sentinel/templates/`):** Shared across all projects on the machine.
+3. **Project-Local (`components/`):** Workspace-specific components (can override user templates).
+
+```bash
+# View or manage user-global templates
+sentinel template dir
+sentinel template list
+sentinel template add path/to/template.yaml [--force]
+sentinel template remove <component-id>
 ```
 
 ### 2. Launching an Experiment

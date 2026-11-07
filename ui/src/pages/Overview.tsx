@@ -1,7 +1,7 @@
 import type { JobRecord, RepoStatus, Vitals } from '../api';
 import { api } from '../api';
 import { usePoll } from '../hooks';
-import { Icon, type IconName } from '../icons';
+import { Icon } from '../icons';
 import { Sparkline } from '../Sparkline';
 import { EmptyState, Skeleton, StatusPill, fmtGB, fmtTime, useToast } from '../ui';
 
@@ -21,12 +21,6 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
   const gpu = hw?.gpus.find((g) => g.gpu_util_percent !== null);
   const init = async () => { try { await api.initRepo(); toast('Sentinel repository initialized'); onRepoChanged(); } catch (e) { toast((e as Error).message, true); } };
 
-  const quick: { icon: IconName; title: string; sub: string; run: () => void }[] = [
-    { icon: 'builder', title: 'Build a model', sub: 'Drag blocks, wire a graph', run: () => openInBuilder('__new__') },
-    { icon: 'components', title: 'Start from a template', sub: 'ANN, LSTM, CNN, GCN…', run: () => go('components') },
-    { icon: 'experiments', title: 'Compare experiments', sub: 'Overlay metric curves', run: () => go('experiments') },
-    { icon: 'system', title: 'System vitals', sub: 'CPU, GPU, network, disks', run: () => go('system') },
-  ];
 
   return (
     <>
@@ -51,9 +45,6 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go, openInBuilder }: {
         </div>
       )}
 
-      <div className="quick">
-        {quick.map((q) => <button key={q.title} onClick={q.run}><span className="ico"><Icon name={q.icon} size={17} /></span><span><b>{q.title}</b><span>{q.sub}</span></span></button>)}
-      </div>
 
       <div className="grid stats">
         <div className="card hover"><div className="stat-title">CPU</div>

@@ -97,7 +97,12 @@ export function Components({ refresh, go, openInBuilder }: { refresh: () => void
           <div className="card hover" key={c.component_id} style={{ display: 'flex', flexDirection: 'column' }}>
             <div className="row sp" style={{ alignItems: 'flex-start' }}>
               <div className="icon-tile" style={{ background: colorOf(c.domain) + '22', color: colorOf(c.domain) }}>{c.domain.slice(0, 2).toUpperCase()}</div>
-              <div className="chips">{c.graph ? <span className="chip on">graph</span> : null}{c.gan ? <span className="chip on">gan</span> : null}<span className="chip">{c.domain}</span></div>
+              <div className="chips">
+                {c.graph ? <span className="chip on">graph</span> : null}
+                {c.gan ? <span className="chip on">gan</span> : null}
+                <span className="chip">{c.domain}</span>
+                {c.origin === 'user' ? <span className="chip" style={{ color: 'var(--accent)' }}>template</span> : c.origin === 'project' ? <span className="chip">custom</span> : null}
+              </div>
             </div>
             <b style={{ marginTop: 12, fontSize: 14 }}>{c.name}</b>
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.component_id}</div>

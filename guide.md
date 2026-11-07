@@ -74,6 +74,20 @@ When the user asks to train a new model or create a new recipe:
 sentinel component new my-model-recipe --extends components/vision/image-classification.yaml
 ```
 
+### Managing Reusable User Templates (3-Tier System)
+Sentinel uses a 3-tier discovery model:
+1. **Built-in (`origin: builtin`):** Shipped directly with the binary (immutable).
+2. **User-Global (`origin: user`):** Stored in `~/.sentinel/templates/` (or `$SENTINEL_TEMPLATES_DIR`) and accessible from any project.
+3. **Project-Local (`origin: project`):** Stored in `./components/` (overrides user templates for project-specific pins).
+
+```bash
+# Manage user-global templates
+sentinel template list
+sentinel template add <file.yaml> [--force]
+sentinel template remove <component-id>
+sentinel template dir
+```
+
 ---
 
 ## 4. Launching & Supervising Training Runs

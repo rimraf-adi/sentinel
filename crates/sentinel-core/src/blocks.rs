@@ -38,7 +38,58 @@ pub enum Block {
     PositionalEncoding,
     Sampling,
     Gat,
+    Rnn,
+    Multiply,
+    Subtract,
+    Divide,
+    Scale,
+    Clamp,
+    Reduce,
+    Argmax,
+    Permute,
+    Transpose,
+    Squeeze,
+    Unsqueeze,
+    Split,
+    Slice,
+    Stack,
+    Repeat,
+    Pad,
+    Matmul,
+    GroupNorm,
+    InstanceNorm,
+    RmsNorm,
+    L2Normalize,
+    Dropout2d,
+    AlphaDropout,
+    GaussianNoise,
+    MaxPool1d,
+    AvgPool1d,
+    AdaptiveAvgPool2d,
+    GlobalMaxPool,
+    Bilinear,
+    Conv3d,
+    ConvTranspose1d,
+    PixelShuffle,
+    DepthwiseConv2d,
+    Rope,
+    CrossAttention,
+    SageConv,
+    GinConv,
+    EdgeDropout,
+    NoiseLike,
+    VectorQuantizer,
+    GumbelSoftmax,
 }
+
+/// Every variant implemented in `more.rs` (the second batch of blocks).
+macro_rules! more_blocks {
+    () => {
+        Block::Multiply | Block::Subtract | Block::Divide | Block::Scale | Block::Clamp | Block::Reduce | Block::Argmax | Block::Permute | Block::Transpose | Block::Squeeze | Block::Unsqueeze | Block::Split | Block::Slice | Block::Stack | Block::Repeat | Block::Pad | Block::Matmul | Block::GroupNorm | Block::InstanceNorm | Block::RmsNorm | Block::L2Normalize | Block::Dropout2d | Block::AlphaDropout | Block::GaussianNoise | Block::MaxPool1d | Block::AvgPool1d | Block::AdaptiveAvgPool2d | Block::GlobalMaxPool | Block::Bilinear | Block::Conv3d | Block::ConvTranspose1d | Block::PixelShuffle | Block::DepthwiseConv2d | Block::Rope | Block::CrossAttention | Block::SageConv | Block::GinConv | Block::EdgeDropout | Block::NoiseLike | Block::VectorQuantizer | Block::GumbelSoftmax
+    };
+}
+
+mod more;
 
 const ALL: &[Block] = &[
     Block::Linear,
@@ -71,6 +122,48 @@ const ALL: &[Block] = &[
     Block::PositionalEncoding,
     Block::Sampling,
     Block::Gat,
+    Block::Rnn,
+    Block::Multiply,
+    Block::Subtract,
+    Block::Divide,
+    Block::Scale,
+    Block::Clamp,
+    Block::Reduce,
+    Block::Argmax,
+    Block::Permute,
+    Block::Transpose,
+    Block::Squeeze,
+    Block::Unsqueeze,
+    Block::Split,
+    Block::Slice,
+    Block::Stack,
+    Block::Repeat,
+    Block::Pad,
+    Block::Matmul,
+    Block::GroupNorm,
+    Block::InstanceNorm,
+    Block::RmsNorm,
+    Block::L2Normalize,
+    Block::Dropout2d,
+    Block::AlphaDropout,
+    Block::GaussianNoise,
+    Block::MaxPool1d,
+    Block::AvgPool1d,
+    Block::AdaptiveAvgPool2d,
+    Block::GlobalMaxPool,
+    Block::Bilinear,
+    Block::Conv3d,
+    Block::ConvTranspose1d,
+    Block::PixelShuffle,
+    Block::DepthwiseConv2d,
+    Block::Rope,
+    Block::CrossAttention,
+    Block::SageConv,
+    Block::GinConv,
+    Block::EdgeDropout,
+    Block::NoiseLike,
+    Block::VectorQuantizer,
+    Block::GumbelSoftmax,
 ];
 
 const HELPER_POSITIONAL: &str = r#"class PositionalEncoding(nn.Module):
@@ -267,6 +360,8 @@ impl Block {
             Block::PositionalEncoding => "positional_encoding",
             Block::Sampling => "sampling",
             Block::Gat => "gat",
+            Block::Rnn => "rnn",
+            more_blocks!() => self.more_name(),
         }
     }
 
@@ -274,12 +369,13 @@ impl Block {
         match self {
             Block::Linear | Block::Activation | Block::Dropout | Block::LayerNorm | Block::BatchNorm => "core",
             Block::Add | Block::Concat | Block::Flatten | Block::Reshape | Block::MeanPool | Block::LastStep => "shape",
-            Block::Lstm | Block::Gru | Block::Embedding => "sequence",
+            Block::Lstm | Block::Gru | Block::Rnn | Block::Embedding => "sequence",
             Block::Attention | Block::TransformerEncoder => "attention",
             Block::Conv1d | Block::Conv2d | Block::MaxPool2d | Block::AvgPool2d | Block::GlobalAvgPool | Block::ConvTranspose2d | Block::Upsample | Block::PatchEmbed => "vision",
             Block::PositionalEncoding | Block::ClsToken | Block::ClsSelect => "attention",
             Block::Sampling => "generative",
             Block::Gcn | Block::Gat => "graph",
+            more_blocks!() => self.more_family(),
         }
     }
 
@@ -315,13 +411,16 @@ impl Block {
             Block::PositionalEncoding => "Add position information to a sequence [B, T, E] (learned or sinusoidal)",
             Block::Sampling => "VAE reparameterization: z = mu + eps * exp(logvar / 2) while training, mu at inference",
             Block::Gat => "Graph attention over node features [B, N, F] and adjacency [B, N, N], with multiple heads",
+            Block::Rnn => "Plain recurrent network (tanh or relu) over a sequence [B, T, F]",
+            more_blocks!() => self.more_description(),
         }
     }
 
     pub fn inputs(&self) -> &'static [&'static str] {
         match self {
-            Block::Add | Block::Concat => &["a", "b"],
-            Block::Gcn | Block::Gat => &["x", "adj"],
+            Block::Add | Block::Concat | Block::Multiply | Block::Subtract | Block::Divide | Block::Stack | Block::Matmul | Block::Bilinear => &["a", "b"],
+            Block::Gcn | Block::Gat | Block::SageConv | Block::GinConv => &["x", "adj"],
+            Block::CrossAttention => &["q", "kv"],
             Block::Sampling => &["mu", "logvar"],
             _ => &["in"],
         }
@@ -329,7 +428,9 @@ impl Block {
 
     pub fn outputs(&self) -> &'static [&'static str] {
         match self {
-            Block::Lstm | Block::Gru => &["out", "last"],
+            Block::Lstm | Block::Gru | Block::Rnn => &["out", "last"],
+            Block::Split => &["a", "b"],
+            Block::VectorQuantizer => &["out", "indices"],
             _ => &["out"],
         }
     }
@@ -343,6 +444,13 @@ impl Block {
             ],
             Block::Dropout => &[("p", "0.1", "Drop probability")],
             Block::Concat => &[("axis", "-1", "Axis to concatenate along")],
+            Block::Rnn => &[
+                ("hidden", "", "Hidden units"),
+                ("layers", "1", "Stacked layers"),
+                ("bidirectional", "false", "Run in both directions"),
+                ("dropout", "0.0", "Dropout between layers"),
+                ("nonlinearity", "\"tanh\"", "tanh | relu"),
+            ],
             Block::Lstm | Block::Gru => &[
                 ("hidden", "", "Hidden units"),
                 ("layers", "1", "Stacked layers"),
@@ -359,11 +467,12 @@ impl Block {
             Block::Reshape => &[("shape", "", "Per-sample target shape, e.g. [2, 1]")],
             Block::Embedding => &[("num_embeddings", "", "Vocabulary size"), ("dim", "", "Embedding size")],
             Block::MeanPool => &[("dim", "1", "Dimension to average")],
-            Block::Attention => &[("heads", "4", "Attention heads")],
+            Block::Attention => &[("heads", "4", "Attention heads"), ("causal", "false", "Mask future positions (autoregressive models)")],
             Block::TransformerEncoder => &[
                 ("heads", "4", "Attention heads"),
                 ("ff", "256", "Feed-forward width"),
                 ("dropout", "0.1", "Dropout"),
+                ("causal", "false", "Mask future positions (autoregressive models)"),
             ],
             Block::Gcn => &[("out", "", "Output features")],
             Block::AvgPool2d => &[("kernel", "2", "Window size"), ("stride", "0", "Stride (0 = kernel)")],
@@ -378,6 +487,7 @@ impl Block {
             Block::PositionalEncoding => &[("max_len", "512", "Longest supported sequence"), ("kind", "\"learned\"", "learned | sinusoidal")],
             Block::Gat => &[("out", "", "Output features per head"), ("heads", "4", "Attention heads"), ("concat", "true", "Concatenate heads (else average)")],
             Block::LayerNorm | Block::BatchNorm | Block::Add | Block::Flatten | Block::LastStep | Block::GlobalAvgPool | Block::ClsToken | Block::ClsSelect | Block::Sampling => &[],
+            more_blocks!() => self.more_param_defs(),
         }
     }
 
@@ -387,6 +497,8 @@ impl Block {
             (Block::Activation, "kind") => ACTIVATIONS,
             (Block::Upsample, "mode") => &["nearest", "bilinear"],
             (Block::PositionalEncoding, "kind") => &["learned", "sinusoidal"],
+            (Block::Rnn, "nonlinearity") => &["tanh", "relu"],
+            (Block::Reduce, "op") => &["sum", "mean", "max", "min", "std", "prod"],
             _ => &[],
         };
         list.iter().map(|s| s.to_string()).collect()
@@ -481,9 +593,12 @@ impl Block {
                     return Err(bad(node, "kind", "must be learned or sinusoidal"));
                 }
             }
-            Block::Lstm | Block::Gru => {
+            Block::Lstm | Block::Gru | Block::Rnn => {
                 pos("hidden")?;
                 pos("layers")?;
+                if *self == Block::Rnn && !matches!(gets(p, "nonlinearity").as_str(), "tanh" | "relu") {
+                    return Err(bad(node, "nonlinearity", "must be tanh or relu"));
+                }
             }
             Block::Conv1d | Block::Conv2d => {
                 pos("out_channels")?;
@@ -524,6 +639,7 @@ impl Block {
                     return Err(bad(node, "shape", "must be a non-empty list of positive integers"));
                 }
             }
+            more_blocks!() => self.more_check_params(node, p)?,
             _ => {}
         }
         Ok(())
@@ -621,7 +737,7 @@ impl Block {
                 };
                 Ok(one("out", o))
             }
-            Block::Lstm | Block::Gru => {
+            Block::Lstm | Block::Gru | Block::Rnn => {
                 let x = x.unwrap();
                 rank(node, "in", x, 3)?;
                 last_const(node, "in", x)?;
@@ -819,6 +935,7 @@ impl Block {
                 }
                 Ok(one("out", x.clone()))
             }
+            more_blocks!() => self.more_infer(node, p, ins),
         }
     }
 
@@ -847,8 +964,8 @@ impl Block {
             Block::Gcn => i * o + o,
             Block::LayerNorm => 2 * i,
             Block::BatchNorm => 2 * chan(first),
-            Block::Lstm | Block::Gru => {
-                let gates = if *self == Block::Lstm { 4 } else { 3 };
+            Block::Lstm | Block::Gru | Block::Rnn => {
+                let gates = match self { Block::Lstm => 4, Block::Gru => 3, _ => 1 };
                 let dirs = if getb(p, "bidirectional") { 2 } else { 1 };
                 let mut total = 0;
                 for layer in 0..geti(p, "layers") as u64 {
@@ -888,6 +1005,7 @@ impl Block {
             Block::Activation if gets(p, "kind") == "prelu" => 1,
             Block::Activation | Block::Dropout | Block::Add | Block::Concat | Block::MaxPool2d | Block::AvgPool2d | Block::GlobalAvgPool | Block::Flatten
             | Block::Reshape | Block::Upsample | Block::MeanPool | Block::LastStep | Block::ClsSelect | Block::Sampling => 0,
+            more_blocks!() => self.more_param_count(p, ins),
         }
     }
 
@@ -931,10 +1049,10 @@ impl Block {
                 let (x, y) = (first?, out?);
                 Some(c(y, 1)? * c(y, 2)? * c(x, 1)? * (geti(p, "patch") * geti(p, "patch")) as u64)
             }
-            Block::Lstm | Block::Gru => {
+            Block::Lstm | Block::Gru | Block::Rnn => {
                 let x = first?;
                 let (t, f) = (c(x, 1)?, c(x, 2)?);
-                let gates = if *self == Block::Lstm { 4 } else { 3 };
+                let gates = match self { Block::Lstm => 4, Block::Gru => 3, _ => 1 };
                 let h = geti(p, "hidden") as u64;
                 let dirs = if getb(p, "bidirectional") { 2 } else { 1 };
                 let mut per_step = 0;
@@ -959,6 +1077,7 @@ impl Block {
                 let (hd, od) = (geti(p, "heads") as u64, geti(p, "out") as u64);
                 Some(n * f * hd * od + n * n * hd * od)
             }
+            more_blocks!() => self.more_macs(p, ins, outs),
             _ => Some(0),
         }
     }
@@ -971,6 +1090,7 @@ impl Block {
             Block::ClsToken => Some(("ClsToken", HELPER_CLS)),
             Block::Sampling => Some(("Sampling", HELPER_SAMPLING)),
             Block::Gat => Some(("GraphAttention", HELPER_GAT)),
+            more_blocks!() => self.more_helper(),
             _ => None,
         }
     }
@@ -1033,12 +1153,13 @@ impl Block {
                     _ => format!("nn.BatchNorm2d({f})"),
                 }
             }
-            Block::Lstm | Block::Gru => {
-                let kind = if *self == Block::Lstm { "LSTM" } else { "GRU" };
+            Block::Lstm | Block::Gru | Block::Rnn => {
+                let kind = match self { Block::Lstm => "LSTM", Block::Gru => "GRU", _ => "RNN" };
+                let extra = if *self == Block::Rnn { format!(", nonlinearity='{}'", gets(p, "nonlinearity")) } else { String::new() };
                 let layers = geti(p, "layers");
                 let drop = if layers > 1 { format!(", dropout={}", getf(p, "dropout")) } else { String::new() };
                 format!(
-                    "nn.{kind}({}, {}, num_layers={layers}, batch_first=True, bidirectional={}{drop})",
+                    "nn.{kind}({}, {}, num_layers={layers}, batch_first=True, bidirectional={}{drop}{extra})",
                     last(x?),
                     geti(p, "hidden"),
                     if getb(p, "bidirectional") { "True" } else { "False" }
@@ -1099,12 +1220,13 @@ impl Block {
                 getf(p, "dropout")
             ),
             Block::Add | Block::Concat | Block::Reshape | Block::MeanPool | Block::LastStep | Block::GlobalAvgPool | Block::ClsSelect => return None,
+            more_blocks!() => return self.more_ctor(p, ins),
         })
     }
 
     /// Python statement(s) for the forward pass. `iv`/`ov` map port -> variable name.
     pub fn forward(&self, node: &str, p: &Params, iv: &BTreeMap<String, String>, ov: &BTreeMap<String, String>) -> String {
-        let o = &ov["out"];
+        let o = ov.get("out").map(String::as_str).unwrap_or("");
         match self {
             Block::Add => format!("{o} = {} + {}", iv["a"], iv["b"]),
             Block::Concat => format!("{o} = torch.cat([{}, {}], dim={})", iv["a"], iv["b"], geti(p, "axis")),
@@ -1118,10 +1240,18 @@ impl Block {
                 let last = if getb(p, "bidirectional") { "torch.cat([_h[-2], _h[-1]], dim=-1)" } else { "_h[-1]" };
                 format!("{o}, (_h, _) = self.{node}({})\n        {} = {last}", iv["in"], ov["last"])
             }
-            Block::Gru => {
+            Block::Gru | Block::Rnn => {
                 let last = if getb(p, "bidirectional") { "torch.cat([_h[-2], _h[-1]], dim=-1)" } else { "_h[-1]" };
                 format!("{o}, _h = self.{node}({})\n        {} = {last}", iv["in"], ov["last"])
             }
+            Block::Attention if getb(p, "causal") => format!(
+                "{o}, _ = self.{node}({0}, {0}, {0}, attn_mask=torch.triu(torch.ones({0}.shape[1], {0}.shape[1], dtype=torch.bool, device={0}.device), diagonal=1))",
+                iv["in"]
+            ),
+            Block::TransformerEncoder if getb(p, "causal") => format!(
+                "{o} = self.{node}({0}, src_mask=torch.triu(torch.full(({0}.shape[1], {0}.shape[1]), float('-inf'), device={0}.device), diagonal=1))",
+                iv["in"]
+            ),
             Block::Attention => format!("{o}, _ = self.{node}({0}, {0}, {0})", iv["in"]),
             Block::Gcn => format!("{o} = torch.bmm({}, self.{node}({}))", iv["adj"], iv["x"]),
             Block::GlobalAvgPool => format!("{o} = {}.mean(dim=(2, 3))", iv["in"]),
@@ -1129,6 +1259,7 @@ impl Block {
             Block::PatchEmbed => format!("{o} = self.{node}({}).flatten(2).transpose(1, 2)", iv["in"]),
             Block::Sampling => format!("{o} = self.{node}({}, {})", iv["mu"], iv["logvar"]),
             Block::Gat => format!("{o} = self.{node}({}, {})", iv["x"], iv["adj"]),
+            more_blocks!() => self.more_forward(node, p, iv, ov),
             _ => format!("{o} = self.{node}({})", iv["in"]),
         }
     }

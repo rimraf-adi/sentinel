@@ -281,3 +281,22 @@ th { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em;
 .bd-bar select { max-width: 100%; min-width: 0; }
 .bd-bar { min-width: 0; }
 .hero { min-width: 0; } .hero > * { min-width: 0; } .hero h1, .hero p, .hero .eyebrow { overflow-wrap: anywhere; }
+
+/* Experiments: run list + detail tabs */
+.xp { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.xp-list { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 170px); }
+.xp-list .input { min-width: 0; width: 100%; }
+.xp-list ul { list-style: none; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }
+.xp-item { display: flex; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; border-left: 2px solid transparent; }
+.xp-item:last-child { border-bottom: 0; } .xp-item:hover { background: var(--surface-2); }
+.xp-item.on { background: var(--surface-hover); border-left-color: var(--accent); }
+.xp-item input { margin-top: 3px; flex-shrink: 0; }
+.xp-main { min-width: 0; flex: 1; } .xp-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.xp-sub { color: var(--text-muted); font-size: 11px; margin-top: 1px; }
+.xp-metrics { display: flex; gap: 12px; margin-top: 4px; font-size: 11px; color: var(--text-muted); } .xp-metrics b { color: var(--text-secondary); font-weight: 500; }
+.xp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.tabs { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); }
+.tabs button { border: 0; background: transparent; color: var(--text-muted); padding: 5px 14px; border-radius: var(--r-sm); font-size: 12px; font-weight: 600; transition: background var(--t-fast), color var(--t-fast); }
+.tabs button:hover { color: var(--text); } .tabs button.on { background: var(--surface-hover); color: #fff; }
+td.muted { color: var(--text-muted); } tr.sect td { padding-top: 16px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; background: var(--bg); }
+@media (max-width: 900px) { .xp { grid-template-columns: 1fr; } .xp-list { position: static; max-height: 260px; } }

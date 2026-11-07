@@ -97,9 +97,45 @@ graph:
   with live shapes), and **Save as -> Compound block** turns the canvas into a new palette block.
 - `sentinel component show <model>` prints the whole tree; `sentinel component blocks` lists both tiers.
 
+**The fundamental catalog (72 blocks).** `sentinel component blocks` lists them all with their parameters; the inferred shapes and
+parameter counts of the newer blocks (and the MACs wherever PyTorch's FLOP counter covers the layer) are checked against real
+PyTorch in `crates/sentinel-core/tests/test_more_blocks.rs`.
+
+| Family | Blocks |
+|---|---|
+| core | `linear`, `activation` (23 kinds), `dropout`, `dropout2d`, `alpha_dropout`, `gaussian_noise`, `layernorm`, `batchnorm`, `groupnorm`, `instancenorm`, `rmsnorm`, `l2_normalize`, `bilinear` |
+| shape and tensor ops | `add`, `subtract`, `multiply`, `divide`, `scale`, `clamp`, `matmul`, `concat`, `stack`, `split`, `slice`, `pad`, `repeat`, `permute`, `transpose`, `squeeze`, `unsqueeze`, `flatten`, `reshape`, `reduce` (sum/mean/max/min/std/prod over any axis), `argmax`, `mean_pool`, `last_step` |
+| vision | `conv1d`, `conv2d`, `conv3d`, `depthwise_conv2d`, `conv_transpose1d`, `conv_transpose2d`, `maxpool1d`, `maxpool2d`, `avgpool1d`, `avgpool2d`, `adaptive_avgpool2d`, `global_avg_pool`, `global_max_pool`, `upsample`, `pixel_shuffle`, `patch_embed` |
+| sequence | `rnn`, `lstm`, `gru`, `embedding` |
+| attention | `attention` and `transformer_encoder` (both with a `causal` option), `cross_attention`, `positional_encoding`, `rope`, `cls_token`, `cls_select` |
+| graph | `gcn`, `gat`, `sage_conv`, `gin_conv`, `edge_dropout` |
+| generative | `sampling`, `noise_like`, `vector_quantizer` (EMA codebook, straight-through gradient), `gumbel_softmax` |
+
 Shipped compound blocks: `mlp_block`, `residual_mlp_block`, `conv_block`, `resnet_block`, `transformer_block`, `unet_down`, `unet_up`,
 `vae_encoder`, `vae_decoder`. Shipped models built from them include `vision/vit-tiny`, `vision/unet`, `vision/resnet-mini`,
 `generative/vae` (trained with reconstruction + beta * KL) and `tabular/deep-residual-mlp`.
+
+## Three-tier templates and component discovery
+
+Models and experiment recipes are discovered through a 3-tier hierarchy:
+
+| Tier | Source | Priority | Purpose |
+|---|---|---|---|
+| **Built-in** | Embedded in binary | Immutable | Shipped baseline models (`tabular/ann-classifier`, `vision/vit-tiny`, `vision/unet`, ...). Cannot be shadowed. |
+| **User template** | `~/.sentinel/templates/` (or `$SENTINEL_TEMPLATES_DIR`) | Global | Reusable templates shared across projects on the machine. |
+| **Project component** | `./components/` | Project-local | Project-specific models and version pins (can override user templates). |
+
+```bash
+# Manage user-global templates
+sentinel template list                                # list user-global templates
+sentinel template add path/to/model.yaml              # install a template into ~/.sentinel/templates
+sentinel template remove tabular/my-template@v1       # uninstall a template
+sentinel template dir                                 # print the template directory path
+
+# List all discovered components across all three tiers
+sentinel component list
+# -> Found 16 components (14 built-in, 1 user template(s), 1 project)
+```
 
 ## Export and predict
 

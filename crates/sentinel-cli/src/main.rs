@@ -49,6 +49,11 @@ enum Commands {
         #[command(subcommand)]
         command: ComponentCommands,
     },
+    /// Manage user-global templates (~/.sentinel/templates)
+    Template {
+        #[command(subcommand)]
+        command: TemplateCommands,
+    },
     /// Export run as standalone pure bare PyTorch script
     Export {
         #[arg(default_value = "script")]
@@ -151,6 +156,27 @@ enum ComponentCommands {
 }
 
 #[derive(Subcommand, Debug)]
+enum TemplateCommands {
+    /// List all user-global templates (~/.sentinel/templates)
+    List,
+    /// Add/install a component YAML file as a user-global template
+    Add {
+        /// Path to the component YAML file to install
+        path: String,
+        /// Force overwrite if template already exists
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Remove a user-global template by component ID
+    Remove {
+        /// Component ID (e.g. tabular/my-template@v1)
+        id: String,
+    },
+    /// Print the user templates directory path
+    Dir,
+}
+
+#[derive(Subcommand, Debug)]
 enum ModelCommands {
     /// Runs that exported a model
     List,
@@ -247,24 +273,41 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Component { command }) => match command {
             ComponentCommands::List => {
-                let mut registry = ComponentRegistry::new();
-                let components_dir = Path::new("components");
-                let custom_loaded = registry.load_from_dir(components_dir).unwrap_or(0);
+                let cwd = std::env::current_dir().unwrap_or_default();
+                let registry = ComponentRegistry::full(&cwd);
+                let list = registry.list();
+                let mut builtin_cnt = 0;
+                let mut user_cnt = 0;
+                let mut project_cnt = 0;
+                for t in &list {
+                    match t.origin.as_deref() {
+                        Some("user") => user_cnt += 1,
+                        Some("project") => project_cnt += 1,
+                        _ => builtin_cnt += 1,
+                    }
+                }
 
                 println!(
-                    "Found {} components ({} custom loaded):",
-                    registry.list().len(),
-                    custom_loaded
+                    "Found {} components ({} built-in, {} user template(s), {} project):",
+                    list.len(),
+                    builtin_cnt,
+                    user_cnt,
+                    project_cnt,
                 );
-                for t in registry.list() {
+                for t in list {
                     let parent = t
                         .extends
                         .as_deref()
                         .map(|p| format!(" (extends {p})"))
                         .unwrap_or_default();
+                    let origin_badge = match t.origin.as_deref() {
+                        Some("user") => "[user template]",
+                        Some("project") => "[project]",
+                        _ => "[built-in]",
+                    };
                     println!(
-                        "  - {:<32} [{}] {}{}",
-                        t.component_id, t.domain, t.name, parent
+                        "  - {:<36} {:<16} [{}] {}{}",
+                        t.component_id, origin_badge, t.domain, t.name, parent
                     );
                 }
             }
@@ -377,10 +420,88 @@ async fn main() -> anyhow::Result<()> {
                 println!("Run anywhere with PyTorch: python {output}");
             }
         },
+        Some(Commands::Template { command }) => match command {
+            TemplateCommands::Dir => {
+                println!("{}", ComponentRegistry::user_templates_dir().display());
+            }
+            TemplateCommands::List => {
+                let dir = ComponentRegistry::user_templates_dir();
+                let mut reg = ComponentRegistry::new();
+                let loaded = reg.load_from_dir_with_origin(&dir, Some("user")).unwrap_or(0);
+                println!("User templates directory: {}", dir.display());
+                if loaded == 0 {
+                    println!("No user templates found. Install one with: sentinel template add <file.yaml>");
+                } else {
+                    println!("Found {} user template(s):", loaded);
+                    for t in reg.list() {
+                        if t.origin.as_deref() == Some("user") {
+                            println!("  * {:<36} [{}] {}", t.component_id, t.domain, t.name);
+                        }
+                    }
+                }
+            }
+            TemplateCommands::Add { path, force } => {
+                let p = Path::new(&path);
+                if !p.exists() {
+                    anyhow::bail!("File not found: {path}");
+                }
+                let content = std::fs::read_to_string(p)?;
+                let c = Component::from_yaml(&content)?;
+
+                if ComponentRegistry::new().get(&c.component_id).is_some() {
+                    anyhow::bail!(
+                        "Cannot install template '{}': conflicts with built-in component. Built-in components cannot be shadowed.",
+                        c.component_id
+                    );
+                }
+
+                let dir = ComponentRegistry::user_templates_dir().join(&c.domain);
+                std::fs::create_dir_all(&dir)?;
+                let slug = sentinel_core::authoring::slugify(&c.name);
+                let dest = dir.join(format!("{slug}.yaml"));
+                if dest.exists() && !force {
+                    anyhow::bail!("Template already exists at {}. Use --force to overwrite.", dest.display());
+                }
+                std::fs::write(&dest, &content)?;
+                println!("✨ Installed template '{}' -> {}", c.component_id, dest.display());
+            }
+            TemplateCommands::Remove { id } => {
+                let dir = ComponentRegistry::user_templates_dir();
+                if !dir.exists() {
+                    anyhow::bail!("No user templates directory at {}", dir.display());
+                }
+                fn walk_remove(d: &Path, target_id: &str) -> std::io::Result<bool> {
+                    if !d.is_dir() { return Ok(false); }
+                    for entry in std::fs::read_dir(d)? {
+                        let path = entry?.path();
+                        if path.is_file() {
+                            if let Ok(c) = std::fs::read_to_string(&path) {
+                                if let Ok(t) = Component::from_yaml(&c) {
+                                    if t.component_id == target_id || path.file_stem().and_then(|s| s.to_str()) == Some(target_id) {
+                                        std::fs::remove_file(&path)?;
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+                        } else if path.is_dir() {
+                            if walk_remove(&path, target_id)? {
+                                return Ok(true);
+                            }
+                        }
+                    }
+                    Ok(false)
+                }
+                if walk_remove(&dir, &id)? {
+                    println!("✨ Removed template '{id}' from {}", dir.display());
+                } else {
+                    anyhow::bail!("Template '{id}' not found in {}", dir.display());
+                }
+            }
+        },
         Some(Commands::Export { format, component, output }) => {
             println!("Exporting component '{component}' as pure standalone {format} to: {output}");
-            let mut registry = ComponentRegistry::new();
-            let _ = registry.load_from_dir(Path::new("components"));
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let registry = ComponentRegistry::full(&cwd);
 
             let tmpl = registry.get(&component).ok_or_else(|| {
                 anyhow::anyhow!("Component '{}' not found in registry", component)
@@ -435,9 +556,9 @@ async fn main() -> anyhow::Result<()> {
 /// Resolve a registry component (plus `--set k=v` overrides) into a validated graph.
 /// Resolve a component (id or YAML file) plus `--set` overrides into a graph, or a GAN's pair of graphs.
 fn build_any(component: &str, set: &[String]) -> anyhow::Result<sentinel_core::components::Built> {
-    let _ = sentinel_core::compound::BlockLibrary::reload_project(Path::new("blocks"));
-    let mut registry = ComponentRegistry::new();
-    let _ = registry.load_from_dir(Path::new("components"));
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let _ = sentinel_core::compound::BlockLibrary::reload_project(&cwd.join("blocks"));
+    let registry = ComponentRegistry::full(&cwd);
     let from_file;
     let c = if component.ends_with(".yaml") || component.ends_with(".yml") {
         from_file = Component::from_yaml(&std::fs::read_to_string(component)?)?;
@@ -533,8 +654,8 @@ async fn run_dev(port: u16, host: &str) -> anyhow::Result<()> {
     // The pool holds the GPUs that really exist (NVIDIA, via nvidia-smi); CPU-only machines get an empty pool.
     let gpu_pool = sentinel_daemon::scheduler::DynamicGpuPool::new(monitor.schedulable_gpus());
     let hardware_monitor = std::sync::Arc::new(tokio::sync::Mutex::new(monitor));
-    let mut registry = ComponentRegistry::new();
-    let _ = registry.load_from_dir(Path::new("components"));
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let registry = ComponentRegistry::full(&cwd);
     let components = std::sync::Arc::new(registry);
 
     let state = sentinel_daemon::server::AppState {

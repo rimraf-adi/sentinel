@@ -33,19 +33,26 @@ sentinel/
 │   │   │   ├── lib.rs                  # Module exports for sentinel-core
 │   │   │   ├── models.rs               # Core types: JobSpec, JobRecord, HardwareStats, MetricPoint
 │   │   │   ├── config.rs               # Hydra / OmegaConf YAML hierarchy & dot-path override engine
-│   │   │   ├── components.rs            # Declarative component schema, registry, validation & inheritance
+│   │   │   ├── components.rs           # Declarative component schema, 3-tier registry, validation & inheritance
+│   │   │   ├── blocks.rs               # Fundamental block catalog & shape inference
+│   │   │   ├── blocks/
+│   │   │   │   └── more.rs             # Extended tensor ops, norms, pools, 3D convolutions & generative blocks
+│   │   │   ├── compound.rs             # Compound block hierarchy & nested module generator
+│   │   │   ├── graph.rs                # Graph DAG validation, cycle detection & shape propagation
+│   │   │   ├── authoring.rs            # Visual Builder serialization & parameter tieing
 │   │   │   ├── scaffold.rs             # Project generator for `sentinel new`
 │   │   │   ├── export.rs               # Zero lock-in pure PyTorch script generator
 │   │   │   └── storage.rs              # Storage interfaces & MLflow driver definitions
 │   │   └── tests/
-│   │       └── test_edge_cases.rs      # 3-level inheritance, strict type, range & malformed YAML tests
+│   │       ├── test_edge_cases.rs      # 3-level inheritance, strict type, range & malformed YAML tests
+│   │       └── test_more_blocks.rs     # 72 fundamental block PyTorch validation tests
 │   ├── sentinel-daemon/                # Process supervisor, scheduler, NVML monitor & Axum API
 │   │   ├── Cargo.toml
 │   │   ├── src/
 │   │   │   ├── lib.rs                  # Module exports for sentinel-daemon
 │   │   │   ├── supervisor.rs           # Async process supervisor, stdout/stderr drain & signal handling
 │   │   │   ├── scheduler.rs            # Dynamic GPU Worker Pool & HardwareMonitor (sysinfo/NVML)
-│   │   │   └── server.rs               # Axum REST API, WebSocket telemetry & metric downsampler
+│   │   │   └── server.rs               # Axum REST API, WebSocket telemetry & 3-tier component reloading
 │   │   └── tests/
 │   │       └── test_stress.rs          # Concurrency, 5,000-line log stress & GPU contention tests
 │   ├── sentinel-agent/                 # Outbound WebSocket remote agent for remote GPU nodes
@@ -59,7 +66,7 @@ sentinel/
 │   │   ├── Cargo.toml
 │   │   ├── pyproject.toml              # Maturin build configuration for PyPI/uv wheels
 │   │   └── src/
-│   │       └── main.rs                 # CLI entry point (dev, run, sweep, component, export, new)
+│   │       └── main.rs                 # CLI entry point (dev, run, sweep, component, template, export, model, new)
 ├── ui/                                 # React dashboard (Vite + TypeScript + React Flow), embedded into the binary
 │   ├── package.json
 │   ├── vite.config.ts

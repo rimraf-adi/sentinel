@@ -90,6 +90,7 @@ export interface Component {
   graph?: unknown;
   gan?: unknown;
   stats?: { params: number; bytes_fp32: number; macs?: number | null; blocks?: number; compounds?: number; depth?: number };
+  origin?: 'builtin' | 'user' | 'project';
 }
 export interface Dataset {
   name: string;

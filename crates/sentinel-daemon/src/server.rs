@@ -115,13 +115,14 @@ pub fn spawn_sampler(state: AppState) {
 }
 
 impl AppState {
-    /// Built-ins plus whatever is in `./components` right now, so newly saved components
-    /// show up without restarting the daemon.
+    /// Built-ins plus user templates (~/.sentinel/templates) and whatever is in `./components` right now,
+    /// so newly saved components and templates show up without restarting the daemon.
     pub fn registry(&self) -> ComponentRegistry {
         // Project blocks first: components that use them must validate when they load.
         let _ = sentinel_core::compound::BlockLibrary::reload_project(&std::env::current_dir().unwrap_or_default().join("blocks"));
         let mut r = (*self.components).clone();
-        let _ = r.load_from_dir(&std::env::current_dir().unwrap_or_default().join("components"));
+        let _ = r.load_user_templates();
+        let _ = r.load_project_components(&std::env::current_dir().unwrap_or_default());
         r
     }
 }
@@ -820,6 +821,8 @@ pub struct SaveComponentRequest {
     pub spec: sentinel_core::authoring::SaveSpec,
     #[serde(default)]
     pub overwrite: bool,
+    #[serde(default)]
+    pub as_template: bool,
 }
 
 async fn save_component(Json(req): Json<SaveComponentRequest>) -> Result<Json<serde_json::Value>, ApiError> {
@@ -830,15 +833,24 @@ async fn save_component(Json(req): Json<SaveComponentRequest>) -> Result<Json<se
     if ComponentRegistry::new().get(&id).is_some() {
         return Err(api_err(StatusCode::CONFLICT, format!("'{id}' is a built-in component; pick another name")));
     }
-    let rel = PathBuf::from("components").join(sentinel_core::authoring::slugify(&req.spec.domain))
-        .join(format!("{}.yaml", sentinel_core::authoring::slugify(&req.spec.name)));
-    let path = std::env::current_dir().unwrap_or_default().join(&rel);
+    let (path, rel) = if req.as_template {
+        let dir = ComponentRegistry::user_templates_dir()
+            .join(sentinel_core::authoring::slugify(&req.spec.domain));
+        let p = dir.join(format!("{}.yaml", sentinel_core::authoring::slugify(&req.spec.name)));
+        let rel_str = format!("~/.sentinel/templates/{}/{}.yaml", sentinel_core::authoring::slugify(&req.spec.domain), sentinel_core::authoring::slugify(&req.spec.name));
+        (p, rel_str)
+    } else {
+        let rel = PathBuf::from("components").join(sentinel_core::authoring::slugify(&req.spec.domain))
+            .join(format!("{}.yaml", sentinel_core::authoring::slugify(&req.spec.name)));
+        let p = std::env::current_dir().unwrap_or_default().join(&rel);
+        (p, rel.display().to_string())
+    };
     if path.exists() && !req.overwrite {
-        return Err(api_err(StatusCode::CONFLICT, format!("{} already exists", rel.display())));
+        return Err(api_err(StatusCode::CONFLICT, format!("{rel} already exists")));
     }
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
     std::fs::write(&path, yaml).map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(json!({ "ok": true, "component_id": id, "path": rel.display().to_string() })))
+    Ok(Json(json!({ "ok": true, "component_id": id, "path": rel })))
 }
 
 // ---------------------------------------------------------------------------

@@ -127,6 +127,7 @@ pub fn build_component_yaml(spec: &SaveSpec) -> Result<(String, String), Compone
         smoke_test: HashMap::new(),
         graph: Some(graph),
         gan: None,
+        origin: None,
     };
     let yaml = component.to_yaml()?;
     // Prove the file we are about to write loads and builds on its own.

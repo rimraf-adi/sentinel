@@ -42,8 +42,8 @@ function ParamField({ p, value, onChange }: { p: CatParam; value: unknown; onCha
   const cur = value === undefined ? p.default : value;
   if (typeof p.default === 'boolean')
     return <Field label={p.name} hint={p.help}><input type="checkbox" checked={!!cur} onChange={(e) => onChange(e.target.checked === p.default ? undefined : e.target.checked)} /></Field>;
-  if (p.options.length > 0)
-    return <Field label={p.name} hint={p.help}>{select(p.options, String(cur), (v) => onChange(v === String(p.default) ? undefined : parse(v)))}</Field>;
+  if ((p.options?.length ?? 0) > 0)
+    return <Field label={p.name} hint={p.help}>{select(p.options ?? [], String(cur), (v) => onChange(v === String(p.default) ? undefined : parse(v)))}</Field>;
   return <Field label={p.name} hint={p.help}><Text value={show(value)} placeholder={show(p.default)} onCommit={(s) => onChange(s.trim() === '' ? undefined : parse(s))} /></Field>;
 }
 
