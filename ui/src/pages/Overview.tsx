@@ -75,7 +75,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
           <div className="row sp" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}><b>Latest experiments</b><button className="btn sm" onClick={() => go('experiments')}>Compare →</button></div>
           {!exps.data ? <div style={{ padding: 16 }}><Skeleton h={14} style={{ marginBottom: 12 }} /><Skeleton h={14} w="80%" /></div>
             : exps.data.length === 0 ? <EmptyState icon={<Icon name="experiments" size={20} />} title="No experiments yet" hint="Train a component and its metric curves land here.">
-                <button className="btn primary" onClick={() => go('components')}>Pick a template</button></EmptyState>
+                <button className="btn primary" onClick={() => go('visualizer')}><Icon name="visualizer" size={14} /> Open DAG Visualizer</button></EmptyState>
             : <table><tbody>{exps.data.slice(0, 5).map((r) => (
               <tr key={r.run_id} style={{ cursor: 'pointer' }} onClick={() => go('experiments')}>
                 <td><b>{r.run_name}</b><div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{r.run_id.slice(0, 8)}</div></td>
@@ -85,7 +85,7 @@ export function Overview({ repo, jobs, hw, onRepoChanged, go }: {
         </div>
         <div className="card" style={{ padding: 0 }}>
           <div className="row sp" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}><b>Recent jobs</b><button className="btn sm" onClick={() => go('runs')}>All runs →</button></div>
-          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a training run from Templates, an agent, or the CLI." />
+          {jobs.length === 0 ? <EmptyState icon={<Icon name="runs" size={20} />} title="No runs yet" hint="Start a training run with an agent, the CLI, or sentinel run." />
             : <table><tbody>{[...jobs].reverse().slice(0, 5).map((j) => (
               <tr key={j.spec.id}><td>{j.spec.name}</td><td><StatusPill status={j.status} /></td><td style={{ color: 'var(--text-muted)' }}>{fmtTime(j.started_at)}</td></tr>))}</tbody></table>}
         </div>

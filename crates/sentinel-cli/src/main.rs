@@ -74,11 +74,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Add/install a modular neural block or template (e.g. `sentinel add --module vit-tiny`)
+    /// Add/install a modular neural block or template (e.g. `sentinel add vit-tiny` or `sentinel add --module vit-tiny`)
     Add {
-        /// Module name to install (e.g. vit-tiny, unet, residual-mlp)
+        /// Module name to install (positional)
+        #[arg(value_name = "MODULE")]
+        module: Option<String>,
+        /// Module name via flag
         #[arg(long = "module")]
-        module: String,
+        module_flag: Option<String>,
         /// Install globally into ~/.sentinel/templates/
         #[arg(long)]
         global: bool,
@@ -541,7 +544,8 @@ async fn main() -> anyhow::Result<()> {
             };
             models::run(ModelCommands::Explain { run: run_id, input, json })?;
         }
-        Some(Commands::Add { module, global }) => {
+        Some(Commands::Add { module, module_flag, global }) => {
+            let module = module.or(module_flag).ok_or_else(|| anyhow::anyhow!("Please specify a module name to install, e.g. `sentinel add vit-tiny`"))?;
             let cwd = std::env::current_dir().unwrap_or_default();
             let registry = ComponentRegistry::full(&cwd);
             
