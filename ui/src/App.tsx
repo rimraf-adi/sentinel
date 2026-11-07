@@ -48,6 +48,20 @@ export function App() {
   const [tab, setTab] = useState<Tab>(init.tab);
   const [visualizerComponent, setVisualizerComponent] = useState<string | null>(init.component);
   const [palette, setPalette] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('sentinel_theme') : null;
+    if (saved === 'light' || saved === 'dark') return saved;
+    return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('sentinel_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === 'light' ? 'dark' : 'light'));
+  }, []);
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
   const datasets = usePoll(api.datasets, 5000);
@@ -160,6 +174,16 @@ export function App() {
               </button>
               {r && !r.lock_file_found && <span className="pill"><span className="dot warn" />sentinel.lock missing</span>}
               <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
+              <button
+                className="pill theme-toggle"
+                onClick={toggleTheme}
+                aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+                style={{ cursor: 'pointer', background: 'var(--surface)', color: 'var(--text-secondary)' }}
+              >
+                <Icon name={theme === 'light' ? 'moon' : 'sun'} size={12} />
+                <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
+              </button>
             </div>
           </header>
           <main id="main" tabIndex={-1} className={'content' + (tab === 'visualizer' ? ' fill' : '')}>
