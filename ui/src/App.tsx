@@ -26,16 +26,23 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number]['id'];
 
-const fromHash = (): Tab => {
-  const h = location.hash.slice(1);
-  if (h === 'builder') return 'visualizer';
-  return (TABS.find((t) => t.id === h)?.id ?? 'overview');
+const parseHash = (): { tab: Tab; component: string | null } => {
+  const raw = location.hash.slice(1);
+  const [tabPart, compPart] = raw.split(/[:?]/);
+  const t = tabPart === 'builder' ? 'visualizer' : tabPart;
+  const tab = (TABS.find((x) => x.id === t)?.id ?? 'overview') as Tab;
+  let component: string | null = null;
+  if (compPart) {
+    component = compPart.startsWith('c=') ? decodeURIComponent(compPart.slice(2)) : decodeURIComponent(compPart);
+  }
+  return { tab, component };
 };
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
 export function App() {
-  const [tab, setTab] = useState<Tab>(fromHash);
-  const [visualizerComponent, setVisualizerComponent] = useState<string | null>(null);
+  const init = parseHash();
+  const [tab, setTab] = useState<Tab>(init.tab);
+  const [visualizerComponent, setVisualizerComponent] = useState<string | null>(init.component);
   const [palette, setPalette] = useState(false);
   const repo = usePoll(api.repo, 5000);
   const jobs = usePoll(api.jobs, 2000);
@@ -43,7 +50,11 @@ export function App() {
   const { hw, online } = useTelemetry();
 
   useEffect(() => {
-    const on = () => setTab(fromHash());
+    const on = () => {
+      const h = parseHash();
+      setTab(h.tab);
+      if (h.component) setVisualizerComponent(h.component);
+    };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
@@ -55,7 +66,10 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, []);
   const go = useCallback((t: string) => { location.hash = t; }, []);
-  const openInVisualizer = useCallback((id: string) => { setVisualizerComponent(id); go('visualizer'); }, [go]);
+  const openInVisualizer = useCallback((id: string) => {
+    setVisualizerComponent(id);
+    location.hash = 'visualizer:' + id;
+  }, []);
   const closePalette = useCallback(() => setPalette(false), []);
 
   const r = repo.data;

@@ -57,6 +57,9 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
     if (!componentId) return;
     setSelectedCompId(componentId);
     setSelectedNode(null);
+    if (location.hash.startsWith('#visualizer')) {
+      location.hash = 'visualizer:' + componentId;
+    }
     try {
       const r = await api.validate({ component_id: componentId });
       if (!r.ok) {
@@ -71,7 +74,7 @@ function Inner({ initialComponent, onConsumed, refreshJobs, go }: Props) {
       });
       const newGraph = fromSpec(r.spec, blocks);
       setGraph(newGraph);
-      setTimeout(() => rf.fitView({ padding: 0.25, maxZoom: 1 }), 60);
+      setTimeout(() => rf.fitView({ padding: 0.12, maxZoom: 1 }), 60);
     } catch (e) {
       toast((e as Error).message, true);
       setStatus({ kind: 'err', text: (e as Error).message });
