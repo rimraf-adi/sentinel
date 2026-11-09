@@ -903,6 +903,7 @@ _latest_ckpt = _ckpt_dir / "checkpoint_latest.pt"
 
 START_EPOCH = 0
 BEST, BEST_EPOCH, BAD, BEST_STATE, EPOCHS_RUN = None, -1, 0, None, 0
+metrics = {}
 
 if RESUME and _latest_ckpt.exists():
     try:
@@ -915,9 +916,14 @@ if RESUME and _latest_ckpt.exists():
         START_EPOCH = _ck.get("epoch", -1) + 1
         BEST = _ck.get("best_metric", None)
         BEST_EPOCH = _ck.get("best_epoch", -1)
+        if "metrics" in _ck and isinstance(_ck["metrics"], dict):
+            metrics = _ck["metrics"]
         print(f"Resumed seamlessly from checkpoint: starting at epoch {START_EPOCH}", flush=True)
     except Exception as _e:
         print(f"Checkpoint resume failed, starting from scratch: {_e}", flush=True)
+
+if START_EPOCH >= EPOCHS and not metrics:
+    metrics = evaluate()
 
 for epoch in range(START_EPOCH, EPOCHS):
     model.train(True)
@@ -973,7 +979,7 @@ for epoch in range(START_EPOCH, EPOCHS):
     lp_loop.push_str("    if epoch % 10 == 0 or epoch == EPOCHS - 1 or STOP:\n        _lr = optimizer.param_groups[0][\"lr\"]\n        _parts = [f\"epoch {epoch:3d}\", f\"loss {loss.item():.4f}\", f\"lr {_lr:.6f}\"] + [f\"{k} {v:.4f}\" for k, v in metrics.items() if k != PRIMARY] + [f\"{PRIMARY} {metrics[PRIMARY]:.4f}\"]\n        print(\" \".join(_parts), flush=True)\n        if sentinel:\n");
     let extra_log = if task == "vae" { ", \"recon\": recon.item(), \"kl\": kl.item()" } else { "" };
     lp_loop.push_str(&format!("            sentinel.log({{\"train_loss\": loss.item(), \"lr\": _lr{extra_log}, **metrics}}, step=epoch)\n"));
-    lp_loop.push_str("    if STOP:\n        break\nif BEST_STATE is not None:\n    model.load_state_dict({k: v.to(DEVICE) for k, v in BEST_STATE.items()})\n    metrics = evaluate()\n    print(f\"restored the best weights from epoch {BEST_EPOCH} ({MONITOR} {BEST:.4f})\", flush=True)\n");
+    lp_loop.push_str("    if STOP:\n        break\nif BEST_STATE is not None:\n    model.load_state_dict({k: v.to(DEVICE) for k, v in BEST_STATE.items()})\n    metrics = evaluate()\n    print(f\"restored the best weights from epoch {BEST_EPOCH} ({MONITOR} {BEST:.4f})\", flush=True)\nelif not metrics:\n    metrics = evaluate()\n");
 
     // ---- export
     let classes_expr = if classes_task { "list(CLASSES)" } else if task == "multilabel" { "list(TARGETS)" } else { "None" };

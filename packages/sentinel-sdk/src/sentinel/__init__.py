@@ -621,7 +621,10 @@ try:
 except ImportError:
     pass
 
-from . import hooks
+try:
+    from . import hooks
+except (ImportError, AttributeError):
+    hooks = None
 
 
 
