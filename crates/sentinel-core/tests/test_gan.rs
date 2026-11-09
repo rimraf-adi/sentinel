@@ -74,7 +74,7 @@ fn interface_mismatches_are_rejected_with_specific_errors() {
 
 #[test]
 fn a_component_cannot_be_both_a_graph_and_a_gan() {
-    let y = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../components/generative/gan.yaml")).unwrap();
+    let y = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("builtin/components/generative/gan.yaml")).unwrap();
     let both = y.replace("gan:\n  generator:", "graph:\n  inputs: {x: [B, 2]}\n  nodes: {a: {block: linear, params: {out: 2}}}\n  edges: ['x -> a']\n  outputs: {y: a}\ngan:\n  generator:");
     assert!(Component::from_yaml(&both).unwrap_err().to_string().contains("not both"));
 }

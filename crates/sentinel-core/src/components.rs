@@ -372,18 +372,18 @@ smoke_test:
     /// Graph components shipped inside the binary so every project has the block library.
     pub fn register_graph_builtins(&mut self) {
         const SHIPPED: &[&str] = &[
-            include_str!("../../../components/tabular/ann-classifier.yaml"),
-            include_str!("../../../components/tabular/residual-mlp.yaml"),
-            include_str!("../../../components/tabular/deep-residual-mlp.yaml"),
-            include_str!("../../../components/sequence/lstm-classifier.yaml"),
-            include_str!("../../../components/sequence/transformer-classifier.yaml"),
-            include_str!("../../../components/vision/cnn-classifier.yaml"),
-            include_str!("../../../components/vision/vit-tiny.yaml"),
-            include_str!("../../../components/vision/unet.yaml"),
-            include_str!("../../../components/vision/resnet-mini.yaml"),
-            include_str!("../../../components/generative/vae.yaml"),
-            include_str!("../../../components/generative/gan.yaml"),
-            include_str!("../../../components/graph/gcn-classifier.yaml"),
+            include_str!("../builtin/components/tabular/ann-classifier.yaml"),
+            include_str!("../builtin/components/tabular/residual-mlp.yaml"),
+            include_str!("../builtin/components/tabular/deep-residual-mlp.yaml"),
+            include_str!("../builtin/components/sequence/lstm-classifier.yaml"),
+            include_str!("../builtin/components/sequence/transformer-classifier.yaml"),
+            include_str!("../builtin/components/vision/cnn-classifier.yaml"),
+            include_str!("../builtin/components/vision/vit-tiny.yaml"),
+            include_str!("../builtin/components/vision/unet.yaml"),
+            include_str!("../builtin/components/vision/resnet-mini.yaml"),
+            include_str!("../builtin/components/generative/vae.yaml"),
+            include_str!("../builtin/components/generative/gan.yaml"),
+            include_str!("../builtin/components/graph/gcn-classifier.yaml"),
         ];
         for y in SHIPPED {
             let mut c = Component::from_yaml(y).expect("shipped graph component must be valid");
