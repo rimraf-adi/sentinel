@@ -492,3 +492,24 @@ fn devices() {
         assert!(predict::predict(&r.art(), &[vec![-3.0, -3.0]]).is_ok());
     }
 }
+
+#[test]
+fn default_checkpointing_and_seamless_resume() {
+    if !have_torch() {
+        return;
+    }
+    let csv = blobs(3, 120, &["x", "y", "z"]);
+    // 1. Train with default checkpointing (mode="latest") for 3 epochs
+    let y = model_yaml(3, &format!("  loss: cross_entropy\n  epochs: 3\n  lr: 0.05\n  batch_size: 60\n{DATA}\n"));
+    let r = ok("ckpt_run", &y, &csv);
+    let ckpt_dir = r.art().join("artifacts/checkpoints");
+    assert!(ckpt_dir.join("checkpoint_latest.pt").exists(), "checkpoint_latest.pt must exist by default");
+
+    // 2. Train with mode="all"
+    let y_all = model_yaml(3, &format!("  loss: cross_entropy\n  epochs: 3\n  lr: 0.05\n  batch_size: 60\n  checkpoint: all\n{DATA}\n"));
+    let r_all = ok("ckpt_all", &y_all, &csv);
+    let ckpt_all_dir = r_all.art().join("artifacts/checkpoints");
+    assert!(ckpt_all_dir.join("checkpoint_latest.pt").exists(), "checkpoint_latest.pt must exist");
+    assert!(ckpt_all_dir.join("checkpoint_epoch_0000.pt").exists(), "per-epoch checkpoint 0 must exist");
+    assert!(ckpt_all_dir.join("checkpoint_epoch_0001.pt").exists(), "per-epoch checkpoint 1 must exist");
+}

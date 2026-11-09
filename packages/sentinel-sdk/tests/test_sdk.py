@@ -91,6 +91,67 @@ def test_get_dataset_path_resolution(tmp_path, monkeypatch):
     # 3. Non-existent returns None
     assert sentinel.get_dataset_path("non_existent_dataset_123") is None
 
+def test_sentinel_checkpointing_latest_and_all(tmp_path):
+    import torch
+    import torch.nn as nn
+    from torch.optim import Adam
+
+    ckpt_dir = tmp_path / "checkpoints"
+
+    # Define simple model and optimizer
+    model1 = nn.Sequential(nn.Linear(4, 2), nn.ReLU())
+    opt1 = Adam(model1.parameters(), lr=0.01)
+
+    # 1. Test mode="latest" (default)
+    p1 = sentinel.save_checkpoint(
+        model=model1,
+        optimizer=opt1,
+        epoch=1,
+        step=10,
+        metrics={"loss": 0.42},
+        mode="latest",
+        checkpoint_dir=str(ckpt_dir),
+    )
+    assert p1 is not None
+    assert (ckpt_dir / "checkpoint_latest.pt").exists()
+    assert not (ckpt_dir / "checkpoint_epoch_1_step_10.pt").exists()
+    assert sentinel.has_checkpoint(str(ckpt_dir))
+
+    # 2. Test mode="all"
+    p2 = sentinel.save_checkpoint(
+        model=model1,
+        optimizer=opt1,
+        epoch=2,
+        step=20,
+        metrics={"loss": 0.28},
+        mode="all",
+        checkpoint_dir=str(ckpt_dir),
+    )
+    assert p2 is not None
+    assert (ckpt_dir / "checkpoint_latest.pt").exists()
+    assert (ckpt_dir / "checkpoint_epoch_2_step_20.pt").exists()
+
+    # 3. Test seamless resume with load_checkpoint
+    model2 = nn.Sequential(nn.Linear(4, 2), nn.ReLU())
+    opt2 = Adam(model2.parameters(), lr=0.01)
+
+    # Weights before load should differ from model1
+    loaded_state = sentinel.load_checkpoint(
+        model=model2,
+        optimizer=opt2,
+        checkpoint_dir=str(ckpt_dir),
+    )
+    assert loaded_state is not None
+    assert loaded_state["epoch"] == 2
+    assert loaded_state["step"] == 20
+    assert loaded_state["metrics"]["loss"] == 0.28
+
+    # Weights after load must match exactly
+    for p_a, p_b in zip(model1.parameters(), model2.parameters()):
+        assert torch.allclose(p_a, p_b)
+
+    print("✅ Sentinel Checkpointing (latest and all) & Seamless Resume PASSED!")
+
 if __name__ == "__main__":
     test_sentinel_mlflow_end_to_end()
     test_safe_tracking_never_crashes()

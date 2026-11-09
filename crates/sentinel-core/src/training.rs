@@ -147,6 +147,8 @@ pub fn catalog() -> Value {
             { "name": "save_best", "help": "Restore the weights from the best epoch when training ends" },
             { "name": "freeze", "help": "Freeze top-level nodes (transfer learning)" },
             { "name": "init_from", "help": "Start from a saved state_dict, e.g. an earlier run's model.pt" },
+            { "name": "checkpoint", "help": "Checkpoint strategy: 'latest' (default) keeps the most recent checkpoint for seamless resume; 'all' keeps all checkpoints; 'off' disables" },
+            { "name": "resume", "help": "Seamlessly resume training from existing checkpoint if found (default: true)" },
         ],
     })
 }
@@ -420,6 +422,9 @@ pub fn plan(g: &ValidatedGraph, t: &TrainingSpec) -> Result<Plan, GraphError> {
         if s.name == "plateau" && t.early_stopping.is_none() && !metrics.contains(&monitor) {
             return Err(bad("plateau scheduling needs a monitored metric"));
         }
+    }
+    if !["latest", "all", "off", "none"].contains(&t.checkpoint.as_str()) {
+        return Err(bad(format!("checkpoint mode must be 'latest', 'all', or 'off' (got '{}')", t.checkpoint)));
     }
     Ok(Plan { task, metrics, primary, monitor, monitor_max, target_cols, out_dim: od })
 }
@@ -872,7 +877,7 @@ pub fn training_script(g: &ValidatedGraph, id: &str) -> Result<String, GraphErro
 
     let mut lp_loop = String::new();
     lp_loop.push_str(&format!(
-        "BATCH = {bs}\nACCUM = {}\nEPOCHS = {}\nPRIMARY = {:?}\nMONITOR = {:?}\nMONITOR_MAX = {}\nEARLY = {}\nPATIENCE = {}\nMIN_DELTA = {}\nSAVE_BEST = {}\nCLIP = {}\nN_BATCHES = math.ceil(N_UNITS / BATCH)\nSTEPS_PER_EPOCH = math.ceil(N_BATCHES / ACCUM)\n\n",
+        "BATCH = {bs}\nACCUM = {}\nEPOCHS = {}\nPRIMARY = {:?}\nMONITOR = {:?}\nMONITOR_MAX = {}\nEARLY = {}\nPATIENCE = {}\nMIN_DELTA = {}\nSAVE_BEST = {}\nCLIP = {}\nCHECKPOINT_MODE = {:?}\nRESUME = {}\nN_BATCHES = math.ceil(N_UNITS / BATCH)\nSTEPS_PER_EPOCH = math.ceil(N_BATCHES / ACCUM)\n\n",
         t.accumulate,
         t.epochs,
         plan.primary,
@@ -883,12 +888,45 @@ pub fn training_script(g: &ValidatedGraph, id: &str) -> Result<String, GraphErro
         num(es.map(|e| e.min_delta).unwrap_or(0.0)),
         if t.save_best { "True" } else { "False" },
         t.clip_grad.map(num).unwrap_or_else(|| "None".into()),
+        t.checkpoint,
+        if t.resume { "True" } else { "False" },
     ));
     lp_loop.push_str(&optimizer_code(t)?);
     lp_loop.push_str(&sched_code);
     lp_loop.push('\n');
-    lp_loop.push_str("BEST, BEST_EPOCH, BAD, BEST_STATE, EPOCHS_RUN = None, -1, 0, None, 0\n");
-    lp_loop.push_str("for epoch in range(EPOCHS):\n    model.train(True)\n    order = torch.randperm(N_UNITS)\n    optimizer.zero_grad(set_to_none=True)\n    for step, i in enumerate(range(0, N_UNITS, BATCH)):\n        idx = order[i:i + BATCH]\n");
+    lp_loop.push_str(
+        r#"_run = sentinel.get_run() if sentinel else None
+_art = pathlib.Path(_run.artifacts_dir) if _run is not None else pathlib.Path(os.environ.get("SENTINEL_ARTIFACT_DIR", "artifacts"))
+_ckpt_dir = _art / "checkpoints"
+_ckpt_dir.mkdir(parents=True, exist_ok=True)
+_latest_ckpt = _ckpt_dir / "checkpoint_latest.pt"
+
+START_EPOCH = 0
+BEST, BEST_EPOCH, BAD, BEST_STATE, EPOCHS_RUN = None, -1, 0, None, 0
+
+if RESUME and _latest_ckpt.exists():
+    try:
+        _ck = torch.load(_latest_ckpt, map_location=DEVICE, weights_only=False)
+        model.load_state_dict(_ck["model_state_dict"])
+        if "optimizer_state_dict" in _ck and _ck["optimizer_state_dict"] is not None and "optimizer" in locals():
+            optimizer.load_state_dict(_ck["optimizer_state_dict"])
+        if "scheduler_state_dict" in _ck and _ck["scheduler_state_dict"] is not None and "scheduler" in locals() and scheduler is not None:
+            scheduler.load_state_dict(_ck["scheduler_state_dict"])
+        START_EPOCH = _ck.get("epoch", -1) + 1
+        BEST = _ck.get("best_metric", None)
+        BEST_EPOCH = _ck.get("best_epoch", -1)
+        print(f"Resumed seamlessly from checkpoint: starting at epoch {START_EPOCH}", flush=True)
+    except Exception as _e:
+        print(f"Checkpoint resume failed, starting from scratch: {_e}", flush=True)
+
+for epoch in range(START_EPOCH, EPOCHS):
+    model.train(True)
+    order = torch.randperm(N_UNITS)
+    optimizer.zero_grad(set_to_none=True)
+    for step, i in enumerate(range(0, N_UNITS, BATCH)):
+        idx = order[i:i + BATCH]
+"#,
+    );
     lp_loop.push_str(&batch_code);
     lp_loop.push_str("        scaler.scale(loss / ACCUM).backward()\n        if (step + 1) % ACCUM == 0 or (step + 1) == N_BATCHES:\n            if CLIP is not None:\n                scaler.unscale_(optimizer)\n                torch.nn.utils.clip_grad_norm_(_params, CLIP)\n            scaler.step(optimizer)\n            scaler.update()\n            optimizer.zero_grad(set_to_none=True)\n");
     if per_batch {
@@ -900,7 +938,38 @@ pub fn training_script(g: &ValidatedGraph, id: &str) -> Result<String, GraphErro
     } else if t.scheduler.is_some() && !per_batch {
         lp_loop.push_str("    scheduler.step()\n");
     }
-    lp_loop.push_str("    _val = metrics[MONITOR]\n    if BEST is None or ((_val > BEST + MIN_DELTA) if MONITOR_MAX else (_val < BEST - MIN_DELTA)):\n        BEST, BEST_EPOCH, BAD = _val, epoch, 0\n        if SAVE_BEST:\n            BEST_STATE = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}\n    else:\n        BAD += 1\n    STOP = EARLY and BAD >= PATIENCE\n    if STOP:\n        print(f\"early stopping at epoch {epoch}: {MONITOR} has not improved for {PATIENCE} epochs (best {BEST:.4f} at epoch {BEST_EPOCH})\", flush=True)\n");
+    lp_loop.push_str(
+        r#"    _val = metrics[MONITOR]
+    if BEST is None or ((_val > BEST + MIN_DELTA) if MONITOR_MAX else (_val < BEST - MIN_DELTA)):
+        BEST, BEST_EPOCH, BAD = _val, epoch, 0
+        if SAVE_BEST:
+            BEST_STATE = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    else:
+        BAD += 1
+    if CHECKPOINT_MODE in ("latest", "all"):
+        try:
+            _payload = {
+                "epoch": epoch,
+                "step": (epoch + 1) * STEPS_PER_EPOCH,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict() if "scheduler" in locals() and scheduler is not None else None,
+                "metrics": metrics,
+                "best_metric": BEST,
+                "best_epoch": BEST_EPOCH,
+            }
+            _tmp = _ckpt_dir / f".tmp_checkpoint_{epoch}.pt"
+            torch.save(_payload, _tmp)
+            if CHECKPOINT_MODE == "all":
+                shutil.copy2(_tmp, _ckpt_dir / f"checkpoint_epoch_{epoch:04d}.pt")
+            os.replace(_tmp, _latest_ckpt)
+        except Exception as _ce:
+            print(f"Checkpoint save warning: {_ce}", flush=True)
+    STOP = EARLY and BAD >= PATIENCE
+    if STOP:
+        print(f"early stopping at epoch {epoch}: {MONITOR} has not improved for {PATIENCE} epochs (best {BEST:.4f} at epoch {BEST_EPOCH})", flush=True)
+"#,
+    );
     lp_loop.push_str("    if epoch % 10 == 0 or epoch == EPOCHS - 1 or STOP:\n        _lr = optimizer.param_groups[0][\"lr\"]\n        _parts = [f\"epoch {epoch:3d}\", f\"loss {loss.item():.4f}\", f\"lr {_lr:.6f}\"] + [f\"{k} {v:.4f}\" for k, v in metrics.items() if k != PRIMARY] + [f\"{PRIMARY} {metrics[PRIMARY]:.4f}\"]\n        print(\" \".join(_parts), flush=True)\n        if sentinel:\n");
     let extra_log = if task == "vae" { ", \"recon\": recon.item(), \"kl\": kl.item()" } else { "" };
     lp_loop.push_str(&format!("            sentinel.log({{\"train_loss\": loss.item(), \"lr\": _lr{extra_log}, **metrics}}, step=epoch)\n"));
@@ -957,7 +1026,8 @@ if sentinel:
     let cfg = serde_json::to_string(&json!({
         "graph": id, "task": task, "loss": t.loss, "optimizer": t.optimizer, "lr": t.lr, "weight_decay": t.weight_decay, "epochs": t.epochs,
         "batch_size": t.batch_size, "beta": t.beta, "scheduler": t.scheduler, "clip_grad": t.clip_grad, "accumulate": t.accumulate,
-        "amp": t.amp, "device": t.device, "early_stopping": t.early_stopping, "save_best": t.save_best, "freeze": t.freeze, "model": model_params,
+        "amp": t.amp, "device": t.device, "early_stopping": t.early_stopping, "save_best": t.save_best, "freeze": t.freeze,
+        "checkpoint": t.checkpoint, "resume": t.resume, "model": model_params,
     }))
     .unwrap();
 

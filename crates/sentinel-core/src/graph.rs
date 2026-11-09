@@ -276,12 +276,26 @@ pub struct TrainingSpec {
     /// Top-level nodes whose weights are frozen (transfer learning).
     #[serde(default)]
     pub freeze: Vec<String>,
+    /// Checkpoint mode: "latest" (default) keeps only the latest checkpoint; "all" keeps all checkpoints; "off" disables.
+    #[serde(default = "default_checkpoint")]
+    pub checkpoint: String,
+    /// Automatically resume from checkpoint if present (default: true).
+    #[serde(default = "default_resume")]
+    pub resume: bool,
     /// Path to a `state_dict` (e.g. an earlier run's `model.pt`) to start from.
     #[serde(default)]
     pub init_from: Option<String>,
     #[serde(default)]
     pub custom: Option<CustomSpec>,
     pub data: DataSpec,
+}
+
+fn default_checkpoint() -> String {
+    "latest".into()
+}
+
+fn default_resume() -> bool {
+    true
 }
 
 fn default_accumulate() -> u32 {

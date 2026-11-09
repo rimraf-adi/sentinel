@@ -218,6 +218,186 @@ def get_run() -> Optional[Run]:
     global _current_run
     return _current_run
 
+# ---------------------------------------------------------
+# Sentinel Built-In Checkpointing & Seamless Resume
+# ---------------------------------------------------------
+
+@_safe_call(default_return=None)
+def save_checkpoint(
+    model,
+    optimizer=None,
+    scheduler=None,
+    epoch: Optional[int] = None,
+    step: Optional[int] = None,
+    metrics: Optional[Dict[str, float]] = None,
+    mode: str = "latest",
+    checkpoint_dir: Optional[str] = None,
+    extra_state: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """
+    Saves a training checkpoint safely with atomic file replacement.
+    
+    Args:
+        model: PyTorch nn.Module instance
+        optimizer: Optional torch.optim.Optimizer
+        scheduler: Optional learning rate scheduler
+        epoch: Current training epoch index
+        step: Current global training step
+        metrics: Dictionary of metric values at this checkpoint
+        mode: "latest" (default) overwrites checkpoint_latest.pt atomically.
+              "all" keeps checkpoint_epoch_{epoch}_step_{step}.pt and updates checkpoint_latest.pt.
+        checkpoint_dir: Target directory. Defaults to active run's artifacts/checkpoints,
+                        or "./checkpoints" if no run is active.
+        extra_state: Optional dictionary of arbitrary extra state.
+        
+    Returns:
+        Path string to the saved checkpoint, or None on failure.
+    """
+    import torch
+
+    global _current_run
+
+    if checkpoint_dir is not None:
+        target_dir = Path(checkpoint_dir)
+    elif _current_run is not None:
+        target_dir = _current_run.artifacts_dir / "checkpoints"
+    else:
+        target_dir = Path(os.environ.get("SENTINEL_CHECKPOINT_DIR", "checkpoints"))
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "epoch": epoch,
+        "step": step,
+        "model_state_dict": model.state_dict() if hasattr(model, "state_dict") else model,
+        "optimizer_state_dict": optimizer.state_dict() if optimizer is not None and hasattr(optimizer, "state_dict") else None,
+        "scheduler_state_dict": scheduler.state_dict() if scheduler is not None and hasattr(scheduler, "state_dict") else None,
+        "metrics": metrics or {},
+        "extra_state": extra_state or {},
+        "timestamp": time.time(),
+        "sentinel_version": "0.1.0",
+    }
+
+    # Save to atomic temp file first to prevent corruption if interrupted
+    tmp_name = f".tmp_ckpt_{uuid.uuid4().hex[:8]}.pt"
+    tmp_path = target_dir / tmp_name
+    torch.save(payload, tmp_path)
+
+    latest_path = target_dir / "checkpoint_latest.pt"
+
+    if mode == "all":
+        ep_tag = f"epoch_{epoch}" if epoch is not None else "epoch_none"
+        st_tag = f"_step_{step}" if step is not None else ""
+        all_name = f"checkpoint_{ep_tag}{st_tag}.pt"
+        shutil.copy2(tmp_path, target_dir / all_name)
+
+    # Atomic rename replaces checkpoint_latest.pt cleanly
+    os.replace(tmp_path, latest_path)
+
+    # Note in Sentinel run if active
+    if _current_run is not None:
+        _current_run._write_tag("sentinel.last_checkpoint", str(latest_path.resolve()))
+        if epoch is not None:
+            _current_run._write_tag("sentinel.last_checkpoint_epoch", str(epoch))
+
+    return str(latest_path.resolve())
+
+
+@_safe_call(default_return=None)
+def get_latest_checkpoint(checkpoint_dir: Optional[str] = None) -> Optional[Path]:
+    """Finds the latest valid checkpoint file."""
+    global _current_run
+
+    if checkpoint_dir is not None:
+        target_dir = Path(checkpoint_dir)
+    elif _current_run is not None:
+        target_dir = _current_run.artifacts_dir / "checkpoints"
+    else:
+        target_dir = Path(os.environ.get("SENTINEL_CHECKPOINT_DIR", "checkpoints"))
+
+    if not target_dir.exists():
+        return None
+
+    latest_file = target_dir / "checkpoint_latest.pt"
+    if latest_file.exists():
+        return latest_file
+
+    # Fallback: scan for any checkpoint_*.pt files sorted by modification time
+    ckpts = sorted(target_dir.glob("checkpoint_*.pt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if ckpts:
+        return ckpts[0]
+
+    return None
+
+
+@_safe_call(default_return=False)
+def has_checkpoint(checkpoint_dir: Optional[str] = None) -> bool:
+    """Returns True if a valid checkpoint is available for resumption."""
+    return get_latest_checkpoint(checkpoint_dir) is not None
+
+
+@_safe_call(default_return=None)
+def load_checkpoint(
+    model,
+    optimizer=None,
+    scheduler=None,
+    path: Optional[str] = None,
+    checkpoint_dir: Optional[str] = None,
+    map_location: Optional[Any] = None,
+    strict: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Seamlessly resumes training by loading the latest (or specified) checkpoint.
+    
+    Args:
+        model: PyTorch nn.Module to load weights into
+        optimizer: Optional optimizer to restore momentum/state
+        scheduler: Optional scheduler to restore step count
+        path: Explicit path to checkpoint file (if None, discovers latest checkpoint)
+        checkpoint_dir: Directory where checkpoints reside (used if path is None)
+        map_location: Device mapping (e.g., 'cpu', 'cuda', torch.device)
+        strict: Whether to strictly enforce key matching in model state_dict
+        
+    Returns:
+        Checkpoint dictionary with keys ('epoch', 'step', 'metrics', 'extra_state', etc.),
+        or None if no checkpoint was found or loading failed.
+    """
+    import torch
+
+    ckpt_path = Path(path) if path is not None else get_latest_checkpoint(checkpoint_dir)
+    if ckpt_path is None or not ckpt_path.exists():
+        return None
+
+    ckpt = torch.load(ckpt_path, map_location=map_location, weights_only=False)
+
+    # 1. Restore model state
+    if "model_state_dict" in ckpt and hasattr(model, "load_state_dict"):
+        model.load_state_dict(ckpt["model_state_dict"], strict=strict)
+    elif hasattr(model, "load_state_dict") and isinstance(ckpt, dict) and not any(k in ckpt for k in ["epoch", "step"]):
+        # Raw state dict format
+        model.load_state_dict(ckpt, strict=strict)
+
+    # 2. Restore optimizer state
+    if optimizer is not None and "optimizer_state_dict" in ckpt and ckpt["optimizer_state_dict"] is not None:
+        try:
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        except Exception as e:
+            logger.warning(f"[Sentinel Checkpoint] Failed to restore optimizer state: {e}")
+
+    # 3. Restore scheduler state
+    if scheduler is not None and "scheduler_state_dict" in ckpt and ckpt["scheduler_state_dict"] is not None:
+        try:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        except Exception as e:
+            logger.warning(f"[Sentinel Checkpoint] Failed to restore scheduler state: {e}")
+
+    logger.info(
+        f"[Sentinel Checkpoint] Resumed successfully from {ckpt_path.name} "
+        f"(epoch: {ckpt.get('epoch')}, step: {ckpt.get('step')})"
+    )
+
+    return ckpt
+
 @_safe_call(default_return=None)
 def get_dataset_path(name: str) -> Optional[str]:
     """Resolve a dataset path from datasets.yaml, sentinel.yaml, or local datasets/ directory.
