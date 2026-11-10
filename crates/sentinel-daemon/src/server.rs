@@ -151,7 +151,7 @@ impl Server {
             .route("/api/tracking/runs", get(tracking_runs))
             .route("/api/tracking/runs/:id", get(tracking_run))
             .route("/api/tracking/runs/:id/artifacts", get(run_artifacts))
-            .route("/api/tracking/runs/:id/artifacts/:name", get(download_artifact))
+            .route("/api/tracking/runs/:id/artifacts/*name", get(download_artifact))
             .route("/api/predict", post(predict_run))
             .route("/api/generate", post(generate_run))
             .route("/api/explain", post(explain_run))
@@ -950,16 +950,33 @@ async fn run_artifacts(AxumPath(id): AxumPath<String>) -> Result<Json<serde_json
 
 /// Only files that appear in the run's own artifact listing can be downloaded, so a name can never escape the directory.
 async fn download_artifact(AxumPath((id, name)): AxumPath<(String, String)>) -> Result<impl IntoResponse, StatusCode> {
+    let clean_name = name.trim_start_matches('/').to_string();
+    if clean_name.contains("..") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let dir = sentinel_core::tracking::run_dir(&mlruns_root(), &id).ok_or(StatusCode::NOT_FOUND)?;
-    if !sentinel_core::predict::list_artifacts(&dir).iter().any(|f| f.name == name) {
+    if !sentinel_core::predict::list_artifacts(&dir).iter().any(|f| f.name == clean_name) {
         return Err(StatusCode::NOT_FOUND);
     }
-    let bytes = std::fs::read(dir.join("artifacts").join(&name)).map_err(|_| StatusCode::NOT_FOUND)?;
-    let ctype = if name.ends_with(".json") { "application/json" } else if name.ends_with(".py") { "text/x-python" } else { "application/octet-stream" };
+    let bytes = std::fs::read(dir.join("artifacts").join(&clean_name)).map_err(|_| StatusCode::NOT_FOUND)?;
+    let ctype = if clean_name.ends_with(".json") {
+        "application/json"
+    } else if clean_name.ends_with(".py") {
+        "text/x-python"
+    } else if clean_name.ends_with(".png") {
+        "image/png"
+    } else if clean_name.ends_with(".jpg") || clean_name.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if clean_name.ends_with(".svg") {
+        "image/svg+xml"
+    } else {
+        "application/octet-stream"
+    };
+    let leaf = clean_name.split('/').last().unwrap_or(&clean_name);
     Ok((
         [
             (axum::http::header::CONTENT_TYPE, ctype.to_string()),
-            (axum::http::header::CONTENT_DISPOSITION, format!("attachment; filename=\"{id}-{name}\"")),
+            (axum::http::header::CONTENT_DISPOSITION, format!("inline; filename=\"{id}-{leaf}\"")),
         ],
         bytes,
     ))
@@ -1035,6 +1052,21 @@ async fn live_explain() -> Result<Json<serde_json::Value>, ApiError> {
 }
 
 async fn live_flow_telemetry(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let root = mlruns_root();
+    for r in sentinel_core::tracking::list_runs(&root) {
+        if let Some(dir) = sentinel_core::tracking::run_dir(&root, &r.run_id) {
+            for sub in &["artifacts/telemetry/live_flow.json", "artifacts/live_flow.json"] {
+                let p = dir.join(sub);
+                if p.exists() {
+                    if let Ok(content) = tokio::fs::read_to_string(&p).await {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            return Ok(Json(val));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let path = std::path::Path::new(".sentinel").join("live_flow.json");
     if path.exists() {
         if let Ok(content) = tokio::fs::read_to_string(&path).await {
@@ -1169,6 +1201,19 @@ async fn run_prescriptions(AxumPath(id): AxumPath<String>) -> Result<Json<sentin
 }
 
 async fn live_loss_landscape() -> Result<Json<serde_json::Value>, ApiError> {
+    let root = mlruns_root();
+    for r in sentinel_core::tracking::list_runs(&root) {
+        if let Some(dir) = sentinel_core::tracking::run_dir(&root, &r.run_id) {
+            let p = dir.join("artifacts").join("loss_landscape.json");
+            if p.exists() {
+                if let Ok(content) = tokio::fs::read_to_string(&p).await {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        return Ok(Json(val));
+                    }
+                }
+            }
+        }
+    }
     let p = Path::new(".sentinel").join("loss_landscape.json");
     if p.exists() {
         if let Ok(content) = tokio::fs::read_to_string(&p).await {

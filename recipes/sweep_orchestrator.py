@@ -9,6 +9,10 @@ import time
 import optuna
 import yaml
 from pathlib import Path
+try:
+    import sentinel
+except ImportError:
+    sentinel = None
 
 def objective(trial, metric_name="val_loss", max_steps=10):
     # Suggest hyperparameters
@@ -60,6 +64,14 @@ def run_sweep(n_trials=10, n_jobs=2):
     )
 
     print(f"🚀 Starting Sentinel Optuna ASHA Sweep ({n_trials} trials, {n_jobs} parallel workers)...")
+    run = None
+    if sentinel:
+        run = sentinel.init(
+            run_name="optuna-asha-sweep",
+            config={"n_trials": n_trials, "n_jobs": n_jobs, "pruner": "SuccessiveHalvingPruner"},
+            tags={"experiment_type": "hyperparameter_sweep", "algorithm": "asha"},
+        )
+
     study.optimize(lambda trial: objective(trial), n_trials=n_trials, n_jobs=n_jobs)
 
     pruned_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
@@ -74,6 +86,49 @@ def run_sweep(n_trials=10, n_jobs=2):
     print(f"   Best Value:       {study.best_value:.4f}")
     print(f"   Best Params:      {study.best_params}")
     print("=" * 60)
+
+    # Save all sweep results and plots strictly into that run directory
+    if sentinel and run:
+        sweep_summary = {
+            "total_trials": len(study.trials),
+            "completed": len(completed_trials),
+            "pruned": len(pruned_trials),
+            "best_trial": study.best_trial.number,
+            "best_value": study.best_value,
+            "best_params": study.best_params,
+            "trials": [
+                {
+                    "number": t.number,
+                    "state": t.state.name,
+                    "value": t.value,
+                    "params": t.params,
+                }
+                for t in study.trials
+            ],
+        }
+        sentinel.save_results(sweep_summary, "sweep_summary.json")
+
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(figsize=(8, 4), dpi=120)
+            valid_trials = [t for t in study.trials if t.value is not None]
+            trial_nums = [t.number for t in valid_trials]
+            trial_vals = [t.value for t in valid_trials]
+            ax.plot(trial_nums, trial_vals, marker="o", linestyle="-", color="#38bdf8", label="Trial Objective")
+            ax.set_title("Optuna ASHA Sweep Objective History", fontsize=11)
+            ax.set_xlabel("Trial #")
+            ax.set_ylabel("Validation Loss")
+            ax.grid(True, linestyle="--", alpha=0.3)
+            ax.legend()
+            sentinel.save_plot("optuna_history.png", fig)
+        except Exception as pe:
+            print(f"[Sentinel Sweep] Plot notice: {pe}")
+
+        sentinel.log({"best_value": study.best_value, "completed_trials": len(completed_trials)})
+        sentinel.finish()
 
     assert len(pruned_trials) > 0, "ASHA pruner should prune at least one losing trial!"
     assert len(completed_trials) > 0, "At least one winning trial should complete!"

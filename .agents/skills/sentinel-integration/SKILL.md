@@ -145,8 +145,18 @@ for epoch in range(1, epochs + 1):
     # Safe logging: will never crash training even if daemon disconnects
     run.log({"loss": loss}, step=epoch)
 
+# All experimental plots and results are isolated in that run directory by default:
+sentinel.save_plot("confusion_matrix.png", fig)
+sentinel.save_results({"val_acc": 0.942, "f1": 0.938}, "metrics.json")
+# Even plain `plt.savefig("loss.png")` is automatically redirected to `<run_dir>/artifacts/plots/`
+
 run.finish()
 ```
+
+### Run Directory Isolation Policy (Default Setting)
+- **Zero Root Pollution**: All experimental plots (`artifacts/plots/`), evaluation summaries (`artifacts/results/`), checkpoints (`artifacts/checkpoints/`), and telemetry are stored exclusively inside the active run directory (`mlruns/<experiment_id>/<run_id>/artifacts/`).
+- **Automatic Plot Redirection**: When a Sentinel run is active, relative `plt.savefig(...)` calls are automatically intercepted and routed to the run's `artifacts/plots/` folder.
+- **Environment Context**: Subprocesses and tools receive `SENTINEL_RUN_DIR`, `SENTINEL_ARTIFACT_DIR`, `SENTINEL_PLOTS_DIR`, and `SENTINEL_RESULTS_DIR`.
 
 ---
 

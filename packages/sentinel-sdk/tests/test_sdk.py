@@ -152,6 +152,61 @@ def test_sentinel_checkpointing_latest_and_all(tmp_path):
 
     print("✅ Sentinel Checkpointing (latest and all) & Seamless Resume PASSED!")
 
+def test_plots_and_results_stay_in_run_directory_by_default(tmp_path, monkeypatch):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    monkeypatch.chdir(tmp_path)
+    tracking_dir = tmp_path / "mlruns"
+
+    # Start run
+    run = sentinel.init(
+        run_name="plots-and-results-isolation-test",
+        tracking_dir=str(tracking_dir),
+    )
+    assert run is not None
+    run_dir = run.run_dir
+    plots_dir = run.plots_dir
+    results_dir = run.results_dir
+
+    # Verify environment variables were set
+    assert os.environ.get("SENTINEL_RUN_DIR") == str(run_dir.resolve())
+    assert os.environ.get("SENTINEL_PLOTS_DIR") == str(plots_dir.resolve())
+    assert os.environ.get("SENTINEL_RESULTS_DIR") == str(results_dir.resolve())
+
+    # 1. Explicit save_plot and log_figure
+    fig, ax = plt.subplots()
+    ax.plot([1, 2, 3], [0.1, 0.4, 0.9])
+    plot_path = sentinel.save_plot("loss_curve", fig)
+    assert Path(plot_path).exists()
+    assert Path(plot_path).parent == plots_dir
+    assert (plots_dir / "loss_curve.png").exists()
+
+    # 2. Explicit save_results
+    eval_results = {"accuracy": 0.942, "loss": 0.081, "f1": 0.938}
+    res_path = sentinel.save_results(eval_results, "eval_metrics.json")
+    assert Path(res_path).exists()
+    assert Path(res_path).parent == results_dir
+    assert (results_dir / "eval_metrics.json").exists()
+
+    # 3. AUTOMATIC DEFAULT REDIRECTION OF MATPLOTLIB SAVEFIG
+    # A standard script simply calls plt.savefig("confusion_matrix.png") without specifying a path
+    plt.figure()
+    plt.plot([0, 1], [1, 0])
+    plt.savefig("confusion_matrix.png")
+    plt.close()
+
+    # Crucial assertion: the root directory MUST NOT contain confusion_matrix.png
+    assert not (tmp_path / "confusion_matrix.png").exists(), "Root directory was polluted with plot!"
+    # The plot MUST stay in the run's plots directory!
+    assert (plots_dir / "confusion_matrix.png").exists(), "Plot was not redirected to run directory!"
+
+    # 4. Finish run
+    sentinel.finish()
+    assert os.environ.get("SENTINEL_RUN_DIR") is None
+    print("✅ Run directory isolation policy for all plots and results PASSED!")
+
 if __name__ == "__main__":
     test_sentinel_mlflow_end_to_end()
     test_safe_tracking_never_crashes()

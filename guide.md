@@ -171,7 +171,12 @@ for epoch in range(1, epochs + 1):
         "val_acc": val_acc
     }, step=epoch)
 
-# 4. Finish run
+# 4. Save Plots & Results (Isolated in Run Directory by Default)
+sentinel.save_plot("loss_curves.png", fig)
+sentinel.save_results({"val_accuracy": val_acc, "test_loss": val_loss}, "results.json")
+# Relative matplotlib calls (e.g. `plt.savefig("acc.png")`) are automatically redirected to <run_dir>/artifacts/plots/
+
+# 5. Finish run
 run.finish()
 ```
 

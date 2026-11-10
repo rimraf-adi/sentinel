@@ -985,11 +985,15 @@ for epoch in range(START_EPOCH, EPOCHS):
     let classes_expr = if classes_task { "list(CLASSES)" } else if task == "multilabel" { "list(TARGETS)" } else { "None" };
     let target_json = if plan.target_cols.is_empty() { "None".to_string() } else { format!("{t0:?}") };
     let export = format!(
-        r#"
+        r##"
 # ---- export: weights, TorchScript, ONNX and metadata, next to the run's other artifacts ----------------------
 _run = sentinel.get_run() if sentinel else None
 _art = pathlib.Path(_run.artifacts_dir) if _run is not None else pathlib.Path(os.environ.get("SENTINEL_ARTIFACT_DIR", "artifacts"))
 _art.mkdir(parents=True, exist_ok=True)
+_plots_dir = _art / "plots"
+_plots_dir.mkdir(parents=True, exist_ok=True)
+_results_dir = _art / "results"
+_results_dir.mkdir(parents=True, exist_ok=True)
 model.cpu()
 model.train(False)
 _example = X[:1]
@@ -1009,6 +1013,43 @@ try:
     _files["onnx"] = "model.onnx"
 except Exception as _e:
     print("onnx export skipped:", _e, flush=True)
+
+_results_payload = {{
+    "graph": {id:?},
+    "task": {task:?},
+    "best_epoch": BEST_EPOCH,
+    "epochs_run": EPOCHS_RUN,
+    "monitor": MONITOR,
+    "metrics": metrics,
+}}
+with open(_art / "results.json", "w") as _rf:
+    json.dump(_results_payload, _rf, indent=2)
+with open(_results_dir / "summary.json", "w") as _rf:
+    json.dump(_results_payload, _rf, indent=2)
+_files["results"] = "results.json"
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as _plt
+    _metric_items = [(k, v) for k, v in metrics.items() if isinstance(v, (int, float))]
+    if _metric_items:
+        _fig, _ax = _plt.subplots(figsize=(6, 3.2), dpi=100)
+        _names = [k for k, _ in _metric_items]
+        _vals = [float(v) for _, v in _metric_items]
+        _bars = _ax.bar(_names, _vals, color="#38bdf8", alpha=0.85, width=0.45)
+        _ax.set_title(f"{id} - Metrics", fontsize=10)
+        _ax.grid(axis="y", linestyle="--", alpha=0.3)
+        for _b, _val in zip(_bars, _vals):
+            _ax.text(_b.get_x() + _b.get_width()/2, _b.get_height() + 0.005, f"{{_val:.3f}}", ha="center", va="bottom", fontsize=8)
+        _plt.tight_layout()
+        _curve_file = _plots_dir / "training_curves.png"
+        _fig.savefig(str(_curve_file), bbox_inches="tight")
+        _plt.close(_fig)
+        _files["training_curves"] = "plots/training_curves.png"
+except Exception:
+    pass
+
 with open(_art / "meta.json", "w") as _f:
     json.dump({{
         "graph": {id:?}, "task": {task:?}, "features": FEATURES, "target": {target_json}, "targets": TARGETS, "group": GROUP,
@@ -1020,7 +1061,7 @@ shutil.copyfile(__file__, _art / "train.py")
 print("artifacts saved to", _art, flush=True)
 if sentinel:
     sentinel.finish()
-"#,
+"##,
         id = id,
         task = task,
         loss = t.loss.name,

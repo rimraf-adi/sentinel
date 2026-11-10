@@ -79,16 +79,26 @@ pub struct ArtifactFile {
     pub bytes: u64,
 }
 
-/// Files in a run's `artifacts/` directory (top level only).
+/// Files in a run's `artifacts/` directory (recursively listed relative to artifacts/).
 pub fn list_artifacts(run_dir: &Path) -> Vec<ArtifactFile> {
-    let mut v: Vec<ArtifactFile> = std::fs::read_dir(run_dir.join("artifacts"))
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| e.path().is_file())
-                .map(|e| ArtifactFile { name: e.file_name().to_string_lossy().to_string(), bytes: e.metadata().map(|m| m.len()).unwrap_or(0) })
-                .collect()
-        })
-        .unwrap_or_default();
+    let art_root = run_dir.join("artifacts");
+    let mut v = Vec::new();
+    fn walk(root: &Path, current: &Path, v: &mut Vec<ArtifactFile>) {
+        if let Ok(entries) = std::fs::read_dir(current) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let rel = path.strip_prefix(root).unwrap_or(&path);
+                    let name = rel.to_string_lossy().replace('\\', "/");
+                    let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    v.push(ArtifactFile { name, bytes });
+                } else if path.is_dir() {
+                    walk(root, &path, v);
+                }
+            }
+        }
+    }
+    walk(&art_root, &art_root, &mut v);
     v.sort_by(|a, b| a.name.cmp(&b.name));
     v
 }

@@ -170,11 +170,19 @@ def explain(
 
 def log_explanation(
     explanation: Dict[str, Any],
-    out_dir: str = ".sentinel",
+    out_dir: Optional[str] = None,
     filename: str = "xai_explanation.json",
 ):
-    """Write explanation report to disk for daemon API and dashboard consumption."""
-    p = Path(out_dir)
+    """Write explanation report to disk for daemon API and dashboard consumption.
+    Defaults to the active Sentinel run's artifacts directory so all results stay in the run directory.
+    """
+    import os
+    if out_dir is not None:
+        p = Path(out_dir)
+    elif os.environ.get("SENTINEL_ARTIFACT_DIR"):
+        p = Path(os.environ["SENTINEL_ARTIFACT_DIR"])
+    else:
+        p = Path(".sentinel")
     p.mkdir(parents=True, exist_ok=True)
     out_file = p / filename
     try:

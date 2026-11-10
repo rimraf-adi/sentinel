@@ -55,9 +55,13 @@ class Run:
         self.params_dir = self.run_dir / "params"
         self.tags_dir = self.run_dir / "tags"
         self.artifacts_dir = self.run_dir / "artifacts"
+        self.plots_dir = self.artifacts_dir / "plots"
+        self.results_dir = self.artifacts_dir / "results"
 
         self._setup_mlflow_dirs()
+        self._set_env_dirs()
         self._write_run_meta(status="RUNNING")
+        _patch_matplotlib_if_loaded()
 
         # Record standard tags
         default_tags = {
@@ -75,6 +79,14 @@ class Run:
         # Record params
         if config:
             self._log_params_recursive(config)
+
+    def _set_env_dirs(self):
+        os.environ["SENTINEL_RUN_DIR"] = str(self.run_dir.resolve())
+        os.environ["SENTINEL_ARTIFACT_DIR"] = str(self.artifacts_dir.resolve())
+        os.environ["SENTINEL_PLOTS_DIR"] = str(self.plots_dir.resolve())
+        os.environ["SENTINEL_RESULTS_DIR"] = str(self.results_dir.resolve())
+        os.environ["SENTINEL_RUN_ID"] = str(self.run_id)
+        os.environ["SENTINEL_EXPERIMENT_ID"] = str(self.experiment_id)
 
     def _setup_mlflow_dirs(self):
         exp_dir = self.tracking_dir / self.experiment_id
@@ -94,6 +106,8 @@ class Run:
         self.params_dir.mkdir(parents=True, exist_ok=True)
         self.tags_dir.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
     def _write_run_meta(self, status: str = "RUNNING", end_time_ms: Optional[int] = None):
         meta_file = self.run_dir / "meta.yaml"
@@ -159,12 +173,86 @@ class Run:
         else:
             shutil.copytree(src, dest_dir / src.name, dirs_exist_ok=True)
 
+    def log_figure(self, figure=None, artifact_path: str = "plots/figure.png", close: bool = True) -> str:
+        """
+        Saves a matplotlib figure directly into this run's artifacts directory.
+        If figure is None, captures current active matplotlib figure (plt.gcf()).
+        """
+        dest = self.artifacts_dir / artifact_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if figure is not None:
+            figure.savefig(str(dest), bbox_inches="tight")
+            if close and hasattr(figure, "clf"):
+                figure.clf()
+        else:
+            try:
+                import matplotlib.pyplot as plt
+                fig = plt.gcf()
+                fig.savefig(str(dest), bbox_inches="tight")
+                if close:
+                    plt.close(fig)
+            except Exception as e:
+                logger.warning(f"[Sentinel SDK] Failed to save active figure: {e}")
+        return str(dest.resolve())
+
+    def save_plot(self, name: str, figure=None, close: bool = True) -> str:
+        """Saves a plot directly into this run's plots directory (artifacts/plots/)."""
+        filename = name if ("." in name) else f"{name}.png"
+        return self.log_figure(figure=figure, artifact_path=f"plots/{filename}", close=close)
+
+    def log_results(self, results: Dict[str, Any], filename: str = "results.json") -> str:
+        """Saves an experiment evaluation or metrics summary dictionary into this run's results directory."""
+        dest = self.results_dir / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(dest, "w", encoding="utf-8") as f:
+                json.dump(results, f, indent=2, default=str)
+        except Exception as e:
+            logger.warning(f"[Sentinel SDK] Failed to save results: {e}")
+        return str(dest.resolve())
+
+    def save_results(self, data: Any, filename: str = "results.json") -> str:
+        """Alias for log_results, ensuring all results stay in the run directory."""
+        if isinstance(data, dict):
+            return self.log_results(data, filename=filename)
+        dest = self.results_dir / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if isinstance(data, str):
+                dest.write_text(data, encoding="utf-8")
+            else:
+                dest.write_text(str(data), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"[Sentinel SDK] Failed to save results data: {e}")
+        return str(dest.resolve())
+
+    def get_plot_dir(self) -> Path:
+        return self.plots_dir
+
+    def get_results_dir(self) -> Path:
+        return self.results_dir
+
+    def get_run_dir(self) -> Path:
+        return self.run_dir
+
+    def get_artifact_dir(self) -> Path:
+        return self.artifacts_dir
+
     def finish(self, status: str = "FINISHED"):
         if not self.is_active:
             return
         end_time_ms = int(time.time() * 1000)
         self._write_run_meta(status=status, end_time_ms=end_time_ms)
         self.is_active = False
+        for var in [
+            "SENTINEL_RUN_DIR",
+            "SENTINEL_ARTIFACT_DIR",
+            "SENTINEL_PLOTS_DIR",
+            "SENTINEL_RESULTS_DIR",
+            "SENTINEL_RUN_ID",
+            "SENTINEL_EXPERIMENT_ID",
+        ]:
+            os.environ.pop(var, None)
 
 import sys
 
@@ -217,6 +305,167 @@ def finish(status: str = "FINISHED"):
 def get_run() -> Optional[Run]:
     global _current_run
     return _current_run
+
+# ---------------------------------------------------------
+# Default Experimental Plots & Results Isolation
+# ---------------------------------------------------------
+
+_original_plt_savefig = None
+_original_fig_savefig = None
+_redirect_plots_enabled = True
+
+def enable_run_plot_redirect(enabled: bool = True):
+    """
+    Enables/disables automatic redirection of relative savefig paths into the active run directory.
+    When enabled (default), any `plt.savefig("my_plot.png")` automatically writes to `<run_dir>/artifacts/plots/my_plot.png`.
+    """
+    global _redirect_plots_enabled
+    _redirect_plots_enabled = enabled
+    _patch_matplotlib_if_loaded()
+
+def disable_run_plot_redirect():
+    enable_run_plot_redirect(False)
+
+def _resolve_run_plot_path(fname):
+    global _current_run, _redirect_plots_enabled
+    if not _redirect_plots_enabled or _current_run is None:
+        return fname
+    if isinstance(fname, (str, Path)):
+        p = Path(fname).resolve()
+        run_resolved = _current_run.run_dir.resolve()
+        try:
+            p.relative_to(run_resolved)
+            # Already inside active run directory
+            return str(p)
+        except ValueError:
+            pass
+
+        # If user explicitly supplied an absolute path, respect it
+        if Path(fname).is_absolute():
+            return fname
+
+        fname_str = str(fname)
+        if fname_str.startswith("plots/") or fname_str.startswith("plots\\"):
+            rel_name = fname_str[6:]
+            target = _current_run.plots_dir / rel_name
+        elif fname_str.startswith("artifacts/") or fname_str.startswith("artifacts\\"):
+            rel_name = fname_str[10:]
+            target = _current_run.artifacts_dir / rel_name
+        else:
+            target = _current_run.plots_dir / Path(fname).name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return str(target.resolve())
+    return fname
+
+def _patch_matplotlib_if_loaded():
+    global _original_plt_savefig, _original_fig_savefig
+    try:
+        import matplotlib
+        import matplotlib.pyplot as plt
+        import matplotlib.figure
+
+        if _original_plt_savefig is None and hasattr(plt, "savefig"):
+            _orig_plt = plt.savefig
+            def _wrapped_plt_savefig(*args, **kwargs):
+                if args:
+                    args_list = list(args)
+                    args_list[0] = _resolve_run_plot_path(args_list[0])
+                    args = tuple(args_list)
+                elif "fname" in kwargs:
+                    kwargs["fname"] = _resolve_run_plot_path(kwargs["fname"])
+                return _orig_plt(*args, **kwargs)
+            plt.savefig = _wrapped_plt_savefig
+            _original_plt_savefig = _orig_plt
+
+        if _original_fig_savefig is None and hasattr(matplotlib.figure.Figure, "savefig"):
+            _orig_fig = matplotlib.figure.Figure.savefig
+            def _wrapped_fig_savefig(self, *args, **kwargs):
+                if args:
+                    args_list = list(args)
+                    args_list[0] = _resolve_run_plot_path(args_list[0])
+                    args = tuple(args_list)
+                elif "fname" in kwargs:
+                    kwargs["fname"] = _resolve_run_plot_path(kwargs["fname"])
+                return _orig_fig(self, *args, **kwargs)
+            matplotlib.figure.Figure.savefig = _wrapped_fig_savefig
+            _original_fig_savefig = _orig_fig
+    except Exception:
+        pass
+
+@_safe_call(default_return=None)
+def log_figure(figure=None, artifact_path: str = "plots/figure.png", close: bool = True) -> Optional[str]:
+    """Saves a matplotlib figure directly into active run's artifacts directory."""
+    global _current_run
+    if _current_run is not None:
+        return _current_run.log_figure(figure=figure, artifact_path=artifact_path, close=close)
+    dest = Path("artifacts") / artifact_path
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if figure is not None:
+        figure.savefig(str(dest), bbox_inches="tight")
+        if close and hasattr(figure, "clf"):
+            figure.clf()
+    return str(dest.resolve())
+
+@_safe_call(default_return=None)
+def save_plot(name: str, figure=None, close: bool = True) -> Optional[str]:
+    """Saves a plot directly into active run's plots directory (<run_dir>/artifacts/plots/)."""
+    filename = name if ("." in name) else f"{name}.png"
+    return log_figure(figure=figure, artifact_path=f"plots/{filename}", close=close)
+
+@_safe_call(default_return=None)
+def log_results(results: Dict[str, Any], filename: str = "results.json") -> Optional[str]:
+    """Saves an experiment evaluation or metrics summary dictionary into this run's results directory."""
+    global _current_run
+    if _current_run is not None:
+        return _current_run.log_results(results, filename=filename)
+    dest = Path("artifacts") / "results" / filename
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, default=str)
+    return str(dest.resolve())
+
+@_safe_call(default_return=None)
+def save_results(data: Any, filename: str = "results.json") -> Optional[str]:
+    """Alias for log_results, ensuring all results stay in the run directory."""
+    if isinstance(data, dict):
+        return log_results(data, filename=filename)
+    global _current_run
+    dest = (_current_run.results_dir if _current_run else Path("artifacts/results")) / filename
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(str(data), encoding="utf-8")
+    return str(dest.resolve())
+
+@_safe_call(default_return=Path("artifacts/plots"))
+def get_plot_dir() -> Path:
+    global _current_run
+    if _current_run is not None:
+        return _current_run.get_plot_dir()
+    d = Path(os.environ.get("SENTINEL_PLOTS_DIR", "artifacts/plots"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+@_safe_call(default_return=Path("artifacts/results"))
+def get_results_dir() -> Path:
+    global _current_run
+    if _current_run is not None:
+        return _current_run.get_results_dir()
+    d = Path(os.environ.get("SENTINEL_RESULTS_DIR", "artifacts/results"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+@_safe_call(default_return=Path("."))
+def get_run_dir() -> Path:
+    global _current_run
+    if _current_run is not None:
+        return _current_run.get_run_dir()
+    return Path(os.environ.get("SENTINEL_RUN_DIR", "."))
+
+@_safe_call(default_return=Path("artifacts"))
+def get_artifact_dir() -> Path:
+    global _current_run
+    if _current_run is not None:
+        return _current_run.get_artifact_dir()
+    return Path(os.environ.get("SENTINEL_ARTIFACT_DIR", "artifacts"))
 
 # ---------------------------------------------------------
 # Sentinel Built-In Checkpointing & Seamless Resume
@@ -442,10 +691,15 @@ def get_dataset_path(name: str) -> Optional[str]:
 
 class ModelFlowWatcher:
     """Attaches forward and backward hooks to PyTorch modules to monitor activations and gradients."""
-    def __init__(self, model, log_freq: int = 10, out_dir: str = ".sentinel"):
+    def __init__(self, model, log_freq: int = 10, out_dir: Optional[str] = None):
         self.model = model
         self.log_freq = log_freq
-        self.out_dir = Path(out_dir)
+        if out_dir is not None:
+            self.out_dir = Path(out_dir)
+        elif _current_run is not None:
+            self.out_dir = _current_run.artifacts_dir / "telemetry"
+        else:
+            self.out_dir = Path(os.environ.get("SENTINEL_TELEMETRY_DIR", ".sentinel"))
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.step = 0
         self.activations: Dict[str, Any] = {}
@@ -600,7 +854,7 @@ class ModelFlowWatcher:
 
 
 @_safe_call(default_return=None)
-def watch_model(model, log_freq: int = 10, out_dir: str = ".sentinel") -> Optional[ModelFlowWatcher]:
+def watch_model(model, log_freq: int = 10, out_dir: Optional[str] = None) -> Optional[ModelFlowWatcher]:
     """Attach forward and backward gradient/activation hooks for live telemetry in Sentinel."""
     return ModelFlowWatcher(model, log_freq=log_freq, out_dir=out_dir)
 
