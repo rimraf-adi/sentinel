@@ -162,59 +162,97 @@ ssh -L 2512:127.0.0.1:2512 <user>@<vps-ip>
 
 ---
 
-## 4. Components & 3-Tier Architecture System
+## 4. Components & Templates Guide (3-Tier Architecture System)
 
-Sentinel resolves templates and architectures through a 3-tier precedence hierarchy:
+Sentinel decouples neural-network **Blocks** (reusable layers and subgraphs under `builtin/blocks/`), **Components** (full runnable graph + training specs), and **Templates** (shareable cross-project component blueprints) across a 3-tier precedence hierarchy (`crates/sentinel-core/src/components.rs`):
 
 | Tier | Origin | Location | Mutability | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **Tier 1** | `builtin` | Embedded in binary | Immutable | Production baselines (ViT, U-Net, ResNet, VAE, GAN) |
-| **Tier 2** | `user` | `~/.sentinel/templates/` | User-wide | Reusable modules shared across all projects |
-| **Tier 3** | `project` | `./components/` | Local Git repo | Project-specific models and configurations |
+| **Tier 1** | `builtin` | Embedded in binary (`crates/sentinel-core/builtin/components/` & `builtin/blocks/`) | Immutable (cannot be shadowed) | Built-in baselines across tabular, sequence, vision, generative, and graph domains |
+| **Tier 2** | `user` | `~/.sentinel/templates/` (or `$SENTINEL_TEMPLATES_DIR`) | Mutable | User-global templates shared across all projects |
+| **Tier 3** | `project` | `./components/` | Mutable (overrides `user` tier) | Project-local components, customizations, and frozen runs |
 
-### Discovery & Inspection Commands
+### Component Commands (`sentinel component`)
 ```bash
-# List all components across all tiers
+# List all components across built-in, user, and project tiers
 sentinel component list
 
-# Inspect component graph, parameter count, FLOPs, and memory footprint
+# Inspect execution order, inferred tensor shapes on every port, parameter count, and MACs
 sentinel component show vision/vit-tiny@v1
+sentinel component show tabular/residual-mlp@v1 --set hidden=64 --set classes=5
 
-# List all available fundamental and compound blocks
+# Scaffold a new project component YAML in ./components/ (optionally extending an existing ID)
+sentinel component new my-mlp --domain tabular
+sentinel component new tuned-mlp --domain tabular --extends tabular/residual-mlp@v1
+
+# Validate schema, port shapes, parameter ranges, and acyclic compound expansion
+sentinel component check components/tabular/my-mlp.yaml
+
+# Freeze an existing trained run into a reusable component
+sentinel component save-run <RUN_ID> my-saved-model
+
+# Compile a graph component directly to standalone PyTorch code (or model class only)
+sentinel component compose tabular/residual-mlp@v1 --output train.py --set lr=0.001
+sentinel component compose vision/vit-tiny@v1 --output model.py --model-only
+
+# List all fundamental + compound blocks, or training catalog options
 sentinel component blocks
-
-# List available training recipes, loss functions, optimizers, and schedulers
-sentinel component training
+sentinel component training --task classification
 ```
 
-### Validating a Component
-Always validate before submitting jobs:
+### Template Commands (`sentinel template`, `add`, `push`)
+Templates reuse the exact component YAML format in Tier 2 (`~/.sentinel/templates/`) or install from Sentinel Hub into `./components/`:
+
 ```bash
-sentinel component check components/tabular/residual-mlp.yaml
+# Print the user-global template directory (~/.sentinel/templates or $SENTINEL_TEMPLATES_DIR)
+sentinel template dir
+
+# List user-global templates
+sentinel template list
+
+# Install a validated component YAML into Tier 2 (--force overwrites an existing user template; built-ins cannot be shadowed)
+sentinel template add components/tabular/my-mlp.yaml
+sentinel template add components/tabular/my-mlp.yaml --force
+
+# Remove a user-global template by component_id
+sentinel template remove tabular/my-mlp@v1
+
+# Install a module from Sentinel Hub (with built-in offline fallback) into ./components/ or ~/.sentinel/templates/
+sentinel add vit-tiny
+sentinel add vit-tiny --global
+
+# Publish a validated component YAML to sentinel-hub
+sentinel push components/tabular/my-mlp.yaml
+sentinel publish components/tabular/my-mlp.yaml
 ```
-Validation asserts:
-- Syntax and schema conform to version `1.0`.
-- Shape propagation matches across all ports and connections.
-- Parameter bounds satisfy ranges (`min` $\le$ `val` $\le$ `max`).
-- No circular dependencies or self-referential compound blocks exist.
+
+### Component Validation Rules
+Run `sentinel component check <path>` before committing or launching jobs. Validation verifies:
+- `schema_version` (`"1.0"`), `component_id`, `name`, `domain`, and typed `parameters` (`int`, `float`, `choice`, `string`).
+- Tensor shape propagation matches across every input, node, and output port.
+- Parameter overrides stay within declared `range` bounds (`min` $\le$ `val` $\le$ `max`) or `options`.
+- No circular graph edges or self-referential compound block definitions exist.
 
 ---
 
-## 5. Declarative Block Specification (YAML)
+## 5. Declarative Block & Component Specification (YAML)
 
-### Compound Block Schema (`blocks/<family>/<name>.yaml`)
+### Compound Block Schema (`crates/sentinel-core/builtin/blocks/<family>/<name>.yaml`)
 Compound blocks define reusable subgraphs with typed parameters and dynamic tensor port shapes:
 
 ```yaml
 compound: residual_mlp_block
+family: core
+description: "An MLP block with a skip connection: out = in + project(mlp(in)). Built from the compound mlp_block"
 params:
-  hidden: {default: 64, type: int}
-  width:  {}                        # No default = mandatory required parameter
+  hidden: {default: 64, help: "Width inside the block (the skip keeps the input width)"}
+  width:  {help: "Input and output features (must equal the input's last dimension)"}
+  dropout: {default: 0.0, help: "Dropout probability"}
 graph:
   inputs:
     in: [B, "${width}"]             # Dynamic tensor dimension interpolation
   nodes:
-    mlp:  {block: mlp_block, params: {width: "${hidden}"}}
+    mlp:  {block: mlp_block, params: {width: "${hidden}", dropout: "${dropout}"}}
     proj: {block: linear, params: {out: "${width}"}}
     skip: {block: add}
   edges:
@@ -226,49 +264,49 @@ graph:
     out: skip
 ```
 
-### Full Model Component Schema (`components/<domain>/<name>.yaml`)
-Combines model graph wiring with execution hyperparameters:
+### Full Model Component / Template Schema (`./components/<name>.yaml` or `~/.sentinel/templates/<domain>/<slug>.yaml`)
+Combines parameterized graph wiring with the `graph.training` recipe (supports `extends:` + `locked:` for inheritance):
 
 ```yaml
 schema_version: "1.0"
 component_id: "tabular/residual-mlp@v1"
-name: "Residual MLP"
+name: "Residual MLP (Skip Connection)"
+description: "MLP with a skip connection (add block) - the smallest real DAG"
 domain: "tabular"
 
 parameters:
-  width: {type: int, default: 32, range: [4, 1024]}
-  hidden: {type: int, default: 64, range: [4, 2048]}
-  classes: {type: int, default: 2, range: [1, 1000]}
+  features:     {type: int, default: 2, range: [1, 4096], help: "Input feature count"}
+  classes:      {type: int, default: 3, range: [1, 1000], help: "Output size: classes or 1 for regression"}
+  hidden:       {type: int, default: 32, range: [2, 1024], help: "Hidden width"}
+  lr:           {type: float, default: 0.01, range: [0.00001, 0.5], help: "Learning rate"}
+  epochs:       {type: int, default: 200, range: [1, 5000], help: "Training epochs"}
+  csv:          {type: string, default: "data/demo.csv", help: "Training CSV"}
+  feature_cols: {type: string, default: "x1,x2", help: "Comma-separated numeric feature columns"}
+  loss:         {type: choice, default: "cross_entropy", options: ["cross_entropy", "mse", "bce_logits"], help: "Loss function"}
+  target:       {type: string, default: "label", help: "Target column"}
 
 graph:
-  inputs:
-    features: [B, "${width}"]
+  inputs: {x: [B, "${features}"]}
   nodes:
-    block1: {block: residual_mlp_block, params: {width: "${width}", hidden: "${hidden}"}}
-    norm:   {block: layernorm}
-    head:   {block: linear, params: {out: "${classes}"}}
+    embed: {block: linear, params: {out: "${hidden}"}}
+    fc:    {block: linear, params: {out: "${hidden}"}}
+    act:   {block: activation, params: {kind: relu}}
+    skip:  {block: add}
+    head:  {block: linear, params: {out: "${classes}"}}
   edges:
-    - "features -> block1"
-    - "block1 -> norm"
-    - "norm -> head"
-  outputs:
-    logits: head
-
-training:
-  loss: {name: cross_entropy}
-  optimizer: {name: adamw, lr: 0.001, weight_decay: 0.01}
-  scheduler: {name: cosine, warmup_epochs: 3}
-  epochs: 50
-  batch_size: 64
-  clip_grad: 1.0
-  accumulate: 1
-  amp: bf16
-  early_stopping: {patience: 10, monitor: "val_loss"}
-  save_best: true
-  data:
-    csv: "data/train.csv"
-    features: ["f1", "f2", "f3"]
-    target: "label"
+    - "x -> embed"
+    - "embed -> fc"
+    - "fc -> act"
+    - "act -> skip.a"
+    - "embed -> skip.b"
+    - "skip -> head"
+  outputs: {logits: head}
+  training:
+    loss: "${loss}"
+    optimizer: adam
+    lr: "${lr}"
+    epochs: "${epochs}"
+    data: {csv: "${csv}", features: "${feature_cols}", target: "${target}"}
 ```
 
 ---
@@ -277,11 +315,11 @@ training:
 
 ### Running Experiments
 ```bash
-# Run using the default project component
-sentinel run
+# Run a component by ID or YAML path
+sentinel run tabular/residual-mlp@v1
 
-# Run with parameter overrides
-sentinel run --component tabular/residual-mlp@v1 --lr 0.0005 --batch-size 128
+# Run with parameter overrides (--set KEY=VALUE, repeatable)
+sentinel run tabular/residual-mlp@v1 --set lr=0.0005 --set epochs=50 --set csv=data/train.csv
 
 # Programmatic submission via REST API
 curl -X POST http://localhost:2512/api/jobs/run-component \
