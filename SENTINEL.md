@@ -91,6 +91,7 @@ brew install mingw-w64
 # 2. Cross-compile target/x86_64-pc-windows-gnu/release/sentinel.exe (with embedded UI)
 ./scripts/build-windows.sh
 ```
+The resulting `sentinel.exe` embeds the dashboard and links only standard Windows system DLLs, so it can be copied directly to a Windows machine without Rust or Node installed.
 
 ### Manual Build from Source (Optional)
 ```bash
@@ -98,17 +99,43 @@ git clone https://github.com/rimraf-adi/sentinel.git
 cd sentinel
 uv sync
 cargo build --release -p sentinel-cli
+
+# macOS & Linux:
 cp ./target/release/sentinel /usr/local/bin/sentinel
+```
+```powershell
+# Windows (PowerShell): copy target\release\sentinel.exe into a directory on PATH
+Copy-Item .\target\release\sentinel.exe C:\sentinel\sentinel.exe
+```
+
+### Windows GPU Setup (CUDA + PyTorch)
+On Windows GPU machines, verify NVIDIA driver access and install a CUDA-enabled PyTorch wheel before launching jobs:
+
+```powershell
+# 1. Confirm NVIDIA driver / NVML visibility
+nvidia-smi
+
+# 2. Create a Python 3.10+ virtual environment with CUDA PyTorch
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
+# (Optional) If running Sentinel without activating .venv:
+$env:SENTINEL_PYTHON = "$PWD\.venv\Scripts\python.exe"
+
+# 3. Verify Python, CUDA availability, and GPU detection
+sentinel doctor
+sentinel gpus
 ```
 
 ### Starting & Managing the Daemon
-The daemon runs the background supervisor, GPU scheduler, API, and embedded web UI:
+The daemon runs the background supervisor, GPU scheduler, API, and embedded web UI (default bind: `127.0.0.1:2512`):
 
 ```bash
 # Start in foreground
 sentinel dev
 
-# Start on custom port in background
+# Start on custom port in background (macOS & Linux)
 sentinel dev --port 2512 > /dev/null 2>&1 &
 
 # Scaffold new Sentinel workspace in current folder
@@ -116,6 +143,21 @@ sentinel init
 
 # Scaffold a new named project
 sentinel new my-ml-project
+```
+
+### Remote VPS Access (Tailscale / SSH Tunnel)
+Sentinel's API can start jobs and has no built-in authentication, so keep it bound to `127.0.0.1` and expose it privately rather than opening `--host 0.0.0.0` or `tailscale funnel` to the public internet:
+
+```powershell
+# Recommended on a remote Windows GPU VPS: Tailscale HTTPS proxy (private to your tailnet)
+sentinel dev
+tailscale serve --bg http://127.0.0.1:2512
+tailscale serve status
+```
+
+```bash
+# Or forward port 2512 over SSH from macOS/Linux
+ssh -L 2512:127.0.0.1:2512 <user>@<vps-ip>
 ```
 
 ---
