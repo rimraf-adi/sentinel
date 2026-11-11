@@ -15,11 +15,11 @@ fn lib_with(defs: &[&str]) -> BlockLibrary {
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn run_python(body: &str) {
-    let out = std::process::Command::new("python3").args(["-I", "-c", body]).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", body]).output().unwrap();
     assert!(out.status.success(), "{}\n--- script ---\n{body}", String::from_utf8_lossy(&out.stderr));
 }
 

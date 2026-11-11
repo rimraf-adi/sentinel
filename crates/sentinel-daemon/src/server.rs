@@ -289,7 +289,9 @@ async fn run_component_job(
     let cmd = if Path::new("recipes/vision_train.py").exists() {
         "uv run python recipes/vision_train.py".to_string()
     } else {
-        "python -c 'print(\"Sentinel job executed successfully\")'".to_string()
+        let py = sentinel_core::platform::python_exe();
+        let script = sentinel_core::platform::shell_quote("print('Sentinel job executed successfully')");
+        format!("{} -c {script}", sentinel_core::platform::shell_quote(&py))
     };
     spec.command = Some(cmd);
 

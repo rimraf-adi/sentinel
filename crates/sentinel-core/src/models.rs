@@ -359,7 +359,8 @@ mod tests {
         assert!(in_repo.exists);
 
         // 2. External dataset
-        let mut external = DatasetSpec::new("external-data", "/tmp", "folder");
+        let temp_dir = std::env::temp_dir().to_string_lossy().to_string();
+        let mut external = DatasetSpec::new("external-data", &temp_dir, "folder");
         external.inspect(&root);
         assert!(external.is_external);
         assert!(external.exists);

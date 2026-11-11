@@ -195,7 +195,7 @@ fn training_script_requires_training_section() {
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3")
+    std::process::Command::new(sentinel_core::platform::python_exe())
         .args(["-c", "import torch"])
         .output()
         .map(|o| o.status.success())
@@ -225,7 +225,7 @@ fn generated_models_run_forward_in_pytorch() {
             "import torch\nimport torch.nn as nn\n{}\nm = Model()\nassert {check}, 'bad output shape'\nprint('ok')\n",
             generate_model(&g)
         );
-        let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+        let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
         assert!(
             out.status.success(),
             "{id} failed:\n{}\n--- script ---\n{script}",
@@ -286,7 +286,7 @@ fn training_script_handles_string_labels_and_missing_values_in_pytorch() {
     ov.insert("epochs".to_string(), serde_yaml::Value::from(150));
     let script = generate_training_script(&c.build_graph(&ov).unwrap(), "t").unwrap();
     std::fs::write(dir.join("train.py"), &script).unwrap();
-    let out = std::process::Command::new("python3").args(["-I", "train.py"]).current_dir(&dir).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "train.py"]).current_dir(&dir).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{}\n{}", String::from_utf8_lossy(&out.stderr), script);
     assert!(stdout.contains("skipped 1 rows with missing values"), "{stdout}");
@@ -298,7 +298,7 @@ fn training_script_handles_string_labels_and_missing_values_in_pytorch() {
     ov.insert("classes".to_string(), serde_yaml::Value::from(2));
     let bad = generate_training_script(&c.build_graph(&ov).unwrap(), "t").unwrap();
     std::fs::write(dir.join("bad.py"), bad).unwrap();
-    let out = std::process::Command::new("python3").args(["-I", "bad.py"]).current_dir(&dir).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "bad.py"]).current_dir(&dir).output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("data has 3 classes"), "{}", String::from_utf8_lossy(&out.stderr));
 }

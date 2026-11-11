@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn gan_component() -> Component {
@@ -104,7 +104,7 @@ fn adversarial_training_learns_a_distribution_and_the_generator_is_usable() {
     let built = build(&c, &[("csv", "d.csv".into()), ("feature_cols", "a,b".into()), ("epochs", 500.into()), ("batch_size", 100.into())]).unwrap();
     std::fs::write(dir.join("train.py"), built.training_script("generative/gan@v1").unwrap()).unwrap();
     let run = dir.join("run");
-    let out = std::process::Command::new("python3").args(["-I", "train.py"]).current_dir(&dir).env("SENTINEL_ARTIFACT_DIR", run.join("artifacts")).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "train.py"]).current_dir(&dir).env("SENTINEL_ARTIFACT_DIR", run.join("artifacts")).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{}\n{stdout}", String::from_utf8_lossy(&out.stderr));
 

@@ -8,7 +8,7 @@ fn graph(yaml: &str) -> Result<sentinel_core::graph::ValidatedGraph, sentinel_co
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn act_graph(params: &str) -> String {
@@ -51,7 +51,7 @@ for c in json.load(sys.stdin):
     assert real == c["params"], (c["kind"], real, c["params"])
 print("ok")
 "#;
-    let mut child = std::process::Command::new("python3").args(["-I", "-c", script]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+    let mut child = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", script]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
     std::io::Write::write_all(child.stdin.as_mut().unwrap(), serde_json::to_string(&cases).unwrap().as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -69,7 +69,7 @@ fn alpha_changes_the_parameterised_activations() {
     let check = |params: &str, body: &str| {
         let code = generate_model(&graph(&act_graph(params)).unwrap());
         let script = format!("import torch\nimport torch.nn as nn\n{code}\nm = Model()\n{body}\nprint('ok')");
-        let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+        let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
         assert!(out.status.success(), "{params}: {}", String::from_utf8_lossy(&out.stderr));
     };
     let neg = "x = -torch.ones(1, 8)\ny = m(x)[0, 0].item()\n";

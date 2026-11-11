@@ -62,7 +62,9 @@ impl ProcessSupervisor {
             Some(cmd) => cmd.clone(),
             None => {
                 // If no command specified, run python on recipe or exit 0
-                "python -c 'print(\"running sentinel default worker\")'".to_string()
+                let py = sentinel_core::platform::python_exe();
+                let script = sentinel_core::platform::shell_quote("print('running sentinel default worker')");
+                format!("{} -c {script}", sentinel_core::platform::shell_quote(&py))
             }
         };
 

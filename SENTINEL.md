@@ -69,13 +69,27 @@ curl -s http://localhost:2512/api/hardware | jq .
 
 ## 3. Installation & Daemon Lifecycle
 
-### Single-Command Installation (macOS & Linux)
+### Single-Command Installation
 ```bash
-# Automated installer script (detects platform, builds/places binary into PATH)
+# macOS & Linux
 curl -fsSL https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.sh | bash
 
-# Or install directly via Cargo from git:
+# Or install directly via Cargo from git (all OS, including Windows):
 cargo install --git https://github.com/rimraf-adi/sentinel.git sentinel-cli
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.ps1 | iex
+```
+
+### Cross-Compiling for Windows from macOS ARM / Linux
+```bash
+# 1. Install mingw-w64 (or `cargo install cargo-xwin` for MSVC targets)
+brew install mingw-w64
+
+# 2. Cross-compile target/x86_64-pc-windows-gnu/release/sentinel.exe (with embedded UI)
+./scripts/build-windows.sh
 ```
 
 ### Manual Build from Source (Optional)

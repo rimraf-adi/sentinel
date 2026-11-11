@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn workdir(tag: &str) -> PathBuf {
@@ -25,7 +25,7 @@ fn train(tag: &str, component: &str, csv: &str, overrides: &[(&str, serde_yaml::
     let g = ComponentRegistry::new().get(component).unwrap().build_graph(&ov).unwrap();
     std::fs::write(dir.join("train.py"), generate_training_script(&g, component).unwrap()).unwrap();
     let run = dir.join("run");
-    let out = std::process::Command::new("python3")
+    let out = std::process::Command::new(sentinel_core::platform::python_exe())
         .args(["-I", "train.py"])
         .current_dir(&dir)
         .env("SENTINEL_ARTIFACT_DIR", run.join("artifacts"))

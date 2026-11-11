@@ -15,16 +15,29 @@ Training code stays plain PyTorch. Models are YAML graphs that export to a stand
 
 ## Quick start
 
-Install with a single command (macOS & Linux):
+Install with a single command:
 
 ```bash
+# macOS & Linux
 curl -fsSL https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/rimraf-adi/sentinel/main/install.ps1 | iex
 ```
 
 Or install via Cargo directly:
 
 ```bash
 cargo install --git https://github.com/rimraf-adi/sentinel.git sentinel-cli
+```
+
+Cross-compile `sentinel.exe` for Windows (`x86_64-pc-windows-gnu` or `msvc`) from macOS/Linux:
+
+```bash
+brew install mingw-w64   # macOS ARM/Intel
+./scripts/build-windows.sh
 ```
 
 Once installed, launch the control plane & dashboard:

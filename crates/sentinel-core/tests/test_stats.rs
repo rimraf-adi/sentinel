@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 const MEASURE: &str = r#"
@@ -31,7 +31,7 @@ print(json.dumps(res))
 
 fn measure(cases: &[(String, &ValidatedGraph, Option<Vec<i64>>)]) -> HashMap<String, Value> {
     let payload: Vec<Value> = cases.iter().map(|(n, g, input)| json!({ "name": n, "code": generate_model(g), "input": input })).collect();
-    let mut child = std::process::Command::new("python3").args(["-I", "-c", MEASURE]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+    let mut child = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", MEASURE]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
     std::io::Write::write_all(child.stdin.as_mut().unwrap(), serde_json::to_string(&payload).unwrap().as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));

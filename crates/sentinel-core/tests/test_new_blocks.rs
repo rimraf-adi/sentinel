@@ -8,7 +8,7 @@ fn graph(yaml: &str) -> Result<sentinel_core::graph::ValidatedGraph, GraphError>
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Generate the model from `yaml` and run `body` against it in real PyTorch (`m` is the instantiated Model).
@@ -19,7 +19,7 @@ fn torch(yaml: &str, body: &str) {
     }
     let code = generate_model(&graph(yaml).unwrap());
     let script = format!("import torch\nimport torch.nn as nn\n{code}\ntorch.manual_seed(0)\nm = Model()\n{body}\nprint('ok')\n");
-    let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
     assert!(out.status.success(), "{}\n--- script ---\n{script}", String::from_utf8_lossy(&out.stderr));
 }
 

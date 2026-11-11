@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn workdir(tag: &str) -> PathBuf {
@@ -71,7 +71,7 @@ fn train(tag: &str, yaml: &str, csv: &str) -> Run {
     std::fs::write(dir.join("d.csv"), csv).unwrap();
     let code = script(yaml).unwrap_or_else(|e| panic!("{tag}: {e}"));
     std::fs::write(dir.join("train.py"), code).unwrap();
-    let out = std::process::Command::new("python3").args(["-I", "train.py"]).current_dir(&dir).env("SENTINEL_ARTIFACT_DIR", dir.join("run").join("artifacts")).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "train.py"]).current_dir(&dir).env("SENTINEL_ARTIFACT_DIR", dir.join("run").join("artifacts")).output().unwrap();
     Run { stdout: String::from_utf8_lossy(&out.stdout).into(), stderr: String::from_utf8_lossy(&out.stderr).into(), ok: out.status.success(), dir }
 }
 
@@ -465,7 +465,7 @@ fn freezing_and_transfer_from_a_checkpoint() {
     assert!(r.stdout.contains("loaded, 0 missing and 0 unexpected keys"), "{}", r.stdout);
     // frozen layer unchanged, trainable layer changed
     let compare = "import torch,sys\na=torch.load(sys.argv[1]);b=torch.load(sys.argv[2])\nprint(torch.equal(a['a.weight'],b['a.weight']), torch.equal(a['h.weight'],b['h.weight']))";
-    let out = std::process::Command::new("python3").args(["-I", "-c", compare]).arg(&weights).arg(r.art().join("artifacts/model.pt")).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", compare]).arg(&weights).arg(r.art().join("artifacts/model.pt")).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "True False", "{}", String::from_utf8_lossy(&out.stderr));
     let meta = predict::read_meta(&r.art()).unwrap();
     assert!(meta["n_trainable"].as_u64().unwrap() < meta["n_params"].as_u64().unwrap());
@@ -480,7 +480,7 @@ fn devices() {
     let y = |dev: &str| model_yaml(3, &format!("  loss: cross_entropy\n  epochs: 5\n  lr: 0.05\n  batch_size: 60\n  device: {dev}\n{DATA}\n"));
     let r = ok("cpu", &y("cpu"), &csv);
     assert!(r.stdout.contains("device: cpu"), "{}", r.stdout);
-    let has = |expr: &str| std::process::Command::new("python3").args(["-c", &format!("import torch,sys; sys.exit(0 if ({expr}) else 1)")]).status().unwrap().success();
+    let has = |expr: &str| std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", &format!("import torch,sys; sys.exit(0 if ({expr}) else 1)")]).status().unwrap().success();
     if !has("torch.cuda.is_available()") {
         let r = train("cuda", &y("cuda"), &csv);
         assert!(!r.ok && r.stderr.contains("CUDA is not available"), "{}\n{}", r.stdout, r.stderr);

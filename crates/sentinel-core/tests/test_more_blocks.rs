@@ -13,7 +13,7 @@ fn graph(yaml: &str) -> Result<ValidatedGraph, GraphError> {
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 const PRELUDE: &str = "import json\nimport torch\nimport torch.nn as nn\nimport torch.nn.functional as F\nfrom torch.utils.flop_counter import FlopCounterMode\n";
@@ -71,7 +71,7 @@ fn run_case(c: &Case, g: &ValidatedGraph) -> Value {
         .replace("__SINGLE__", &json!(g.outputs.keys().next().unwrap()).to_string())
         .replace("__FLOPS__", if c.flops { "True" } else { "False" });
     let script = format!("{PRELUDE}{}\n{setup}\n{}\nprint('RESULT ' + json.dumps(r))\n", generate_model(g), c.body);
-    let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
     assert!(out.status.success(), "[{}] PyTorch failed:\n{}\n--- script ---\n{script}", c.name, String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
     let line = stdout.lines().rev().find_map(|l| l.strip_prefix("RESULT ")).unwrap_or_else(|| panic!("[{}] no result line in:\n{stdout}", c.name));
@@ -521,7 +521,7 @@ fn vector_quantizer_passes_gradients_straight_through() {
         "import torch\nimport torch.nn as nn\n{}\nm = Model()\nx = torch.randn(2, 4, 8)\nm(x).sum().backward()\nassert m.enc.weight.grad is not None and m.enc.weight.grad.abs().sum() > 0, 'the encoder trains through the quantizer'\nassert len(list(m.vq.parameters())) == 0\nprint('ok')",
         generate_model(&g)
     );
-    let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 

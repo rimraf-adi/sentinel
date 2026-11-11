@@ -11,7 +11,7 @@ fn build(id: &str, overrides: &[(&str, serde_yaml::Value)]) -> ValidatedGraph {
 }
 
 fn have_torch() -> bool {
-    std::process::Command::new("python3").args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(sentinel_core::platform::python_exe()).args(["-c", "import torch"]).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 fn forward(g: &ValidatedGraph, body: &str) {
@@ -20,7 +20,7 @@ fn forward(g: &ValidatedGraph, body: &str) {
         return;
     }
     let script = format!("import torch\nimport torch.nn as nn\n{}\nm = Model()\n{body}\nprint('ok')\n", generate_model(g));
-    let out = std::process::Command::new("python3").args(["-I", "-c", &script]).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "-c", &script]).output().unwrap();
     assert!(out.status.success(), "{}\n--- script ---\n{script}", String::from_utf8_lossy(&out.stderr));
 }
 
@@ -107,7 +107,7 @@ fn vae_trains_on_a_csv_and_its_loss_falls() {
     let script = generate_training_script(&g, "generative/vae@v1").unwrap();
     assert!(script.contains("BETA = 0.01") && script.contains("kl = -0.5"), "{script}");
     std::fs::write(dir.join("train.py"), script).unwrap();
-    let out = std::process::Command::new("python3").args(["-I", "train.py"]).current_dir(&dir).output().unwrap();
+    let out = std::process::Command::new(sentinel_core::platform::python_exe()).args(["-I", "train.py"]).current_dir(&dir).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{}\n{stdout}", String::from_utf8_lossy(&out.stderr));
     let vals: Vec<f64> = stdout.lines().filter(|l| l.contains("test_recon")).map(|l| l.rsplit(' ').next().unwrap().parse().unwrap()).collect();
