@@ -290,8 +290,13 @@ async fn run_component_job(
         "uv run python recipes/vision_train.py".to_string()
     } else {
         let py = sentinel_core::platform::python_exe();
+        let py_cmd = if py.chars().any(char::is_whitespace) {
+            sentinel_core::platform::shell_quote(&py)
+        } else {
+            py
+        };
         let script = sentinel_core::platform::shell_quote("print('Sentinel job executed successfully')");
-        format!("{} -c {script}", sentinel_core::platform::shell_quote(&py))
+        format!("{py_cmd} -c {script}")
     };
     spec.command = Some(cmd);
 

@@ -63,8 +63,13 @@ impl ProcessSupervisor {
             None => {
                 // If no command specified, run python on recipe or exit 0
                 let py = sentinel_core::platform::python_exe();
+                let py_cmd = if py.chars().any(char::is_whitespace) {
+                    sentinel_core::platform::shell_quote(&py)
+                } else {
+                    py
+                };
                 let script = sentinel_core::platform::shell_quote("print('running sentinel default worker')");
-                format!("{} -c {script}", sentinel_core::platform::shell_quote(&py))
+                format!("{py_cmd} -c {script}")
             }
         };
 
@@ -76,6 +81,11 @@ impl ProcessSupervisor {
         cmd.current_dir(&spec.working_dir);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+
+        // Ensure live log streaming and UTF-8 output under piped Windows/Linux consoles
+        cmd.env("PYTHONUNBUFFERED", "1");
+        cmd.env("PYTHONUTF8", "1");
+        cmd.env("PYTHONIOENCODING", "utf-8");
 
         // Environment variables
         for (k, v) in &spec.env_vars {
