@@ -48,6 +48,42 @@ sentinel dev # dashboard active at http://localhost:2512
 
 Use `--port` to change the port. Run `sentinel doctor` to verify your Python and PyTorch setup.
 
+### Windows GPU & Remote VPS Setup
+
+1. **Install Python 3.10+ & CUDA PyTorch** (matching your NVIDIA driver):
+
+   ```powershell
+   nvidia-smi                                 # verify GPU driver works
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+   ```
+
+   *(If you run `sentinel` without activating `.venv`, point it to that interpreter: `$env:SENTINEL_PYTHON = "$PWD\.venv\Scripts\python.exe"`.)*
+
+2. **Initialize & verify CUDA telemetry:**
+
+   ```powershell
+   sentinel init
+   sentinel doctor
+   sentinel gpus
+   ```
+
+3. **Access the dashboard safely from another machine:**
+
+   Sentinel binds `127.0.0.1:2512` by default because its API can spawn jobs and has no built-in auth. Expose it privately over **Tailscale** or an **SSH tunnel**:
+
+   ```powershell
+   # Tailscale HTTPS proxy (recommended on a remote Windows GPU VPS; private to your tailnet)
+   sentinel dev
+   tailscale serve --bg http://127.0.0.1:2512
+   ```
+
+   ```bash
+   # Or SSH local port forward from macOS/Linux
+   ssh -L 2512:127.0.0.1:2512 <user>@<vps-ip>
+   ```
+
 ## Architecture
 
 | Plane | Language | Responsibilities |
