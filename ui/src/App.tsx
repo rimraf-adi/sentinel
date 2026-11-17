@@ -133,6 +133,7 @@ export function App() {
                     <span className="nav-label">{t.label}</span>
                     {t.id === 'runs' && running > 0 && <span className="badge running" aria-label={`${running} running`}><span className="dot ok pulse" />{running}</span>}
                     {t.id === 'datasets' && (datasets.data?.length ?? 0) > 0 && <span className="badge">{datasets.data?.length}</span>}
+                    {t.id === 'system' && online && <span className="badge" style={{ color: 'var(--accent)' }}><span className="dot ok pulse" />LIVE</span>}
                     {t.id === 'integrations' && <span className="badge" style={{ color: 'var(--accent)' }}>{activeIntegrations.filter((i) => i.enabled).length} active</span>}
                   </button>
                 ))}
@@ -174,6 +175,31 @@ export function App() {
               </button>
               {r && !r.lock_file_found && <span className="pill"><span className="dot warn" />sentinel.lock missing</span>}
               <span className="pill" role="status"><span className={'dot ' + (online ? 'ok' : 'err')} />{online ? 'daemon online' : 'daemon offline'}</span>
+              {hw && (
+                <button
+                  className="pill telemetry-live"
+                  onClick={() => go('system')}
+                  title="Live Telemetry Streaming via WebSocket (Click to open System)"
+                  style={{
+                    cursor: 'pointer',
+                    background: 'var(--surface)',
+                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '3px 8px',
+                    borderRadius: '999px',
+                  }}
+                >
+                  <span className="dot ok pulse" />
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', letterSpacing: '0.04em' }}>LIVE</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-primary)' }}>CPU {Math.round(hw.cpu_util_percent)}%</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)' }}>RAM {Math.round((hw.ram_used_bytes / (1024 ** 3)) * 10) / 10}G</span>
+                  {hw.gpus && hw.gpus.length > 0 && hw.gpus[0].gpu_util_percent !== null && (
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--accent)' }}>GPU {Math.round(hw.gpus[0].gpu_util_percent ?? 0)}%</span>
+                  )}
+                </button>
+              )}
               <button
                 className="pill theme-toggle"
                 onClick={toggleTheme}

@@ -628,10 +628,17 @@ for epoch in range(1, 11):
         "val/accuracy": val_acc
     }, step=epoch)
 
-# 4. Save artifacts and finalize run
+# 4. Save artifacts, logs, and finalize run
+run.log_message("Model training completed successfully. Restoring best weights.")
 run.log_artifact("weights/best_model.pt")
-run.finish()
+run.finish() # Automatically generates logs/summary.log & logs/train.log inside experiments/
 ```
+
+### Detailed Logs Inside Experiments Directory
+When an experiment executes, Sentinel creates detailed logs inside `experiments/<experiment_name>/logs/`:
+- **`train.log`**: Step-by-step training events, loss values, learning rates, and timestamped log lines.
+- **`summary.log`**: Comprehensive final run report recording task type, device used, best epoch, final metric values, duration, and artifact paths.
+- **Environment Context**: Code and subprocesses have access to `SENTINEL_LOGS_DIR` pointing directly to the experiment's log directory.
 
 ---
 
@@ -681,6 +688,13 @@ The Sentinel daemon exposes an asynchronous JSON API on port 2512:
 | `/api/training/catalog` | `GET` | None | Catalog of available tasks, losses, optimizers |
 | `/api/predict` | `POST` | `{"run_id": "...", "inputs": [...]}` | Execute stateless prediction |
 | `/ws/live` | `WebSocket` | Telemetry packet | Real-time bi-directional telemetry stream |
+
+### Live Telemetry Streaming in GUI & WebSockets
+- **WebSocket Feed (`ws://localhost:2512/ws/live`)**: Streams high-frequency hardware packets (`{ type: "telemetry", data: Vitals }`) every 1,000ms over WebSocket without polling overhead.
+- **Embedded Web Dashboard (`http://localhost:2512`)**:
+  - **Top Navigation Bar**: Live telemetry badge with pulsing indicator (`LIVE CPU % RAM % GPU %`), showing real-time resource consumption on every page.
+  - **System Observability Page (`#system`)**: In-depth GPU temperatures, PCIe clock speeds, fan speeds, VRAM utilization, per-core CPU breakdown, and historical telemetry trends.
+  - **Overview Page (`#overview`)**: Instant hardware health cards and active job supervisor state.
 
 ---
 

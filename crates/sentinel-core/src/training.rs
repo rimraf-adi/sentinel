@@ -994,6 +994,8 @@ _plots_dir = _art / "plots"
 _plots_dir.mkdir(parents=True, exist_ok=True)
 _results_dir = _art / "results"
 _results_dir.mkdir(parents=True, exist_ok=True)
+_logs_dir = _art / "logs"
+_logs_dir.mkdir(parents=True, exist_ok=True)
 model.cpu()
 model.train(False)
 _example = X[:1]
@@ -1027,6 +1029,37 @@ with open(_art / "results.json", "w") as _rf:
 with open(_results_dir / "summary.json", "w") as _rf:
     json.dump(_results_payload, _rf, indent=2)
 _files["results"] = "results.json"
+
+_summary_log = (
+    "============================================================\n"
+    f"TRAINING EXECUTION SUMMARY: {{_results_payload['graph']}}\n"
+    f"Task:        {{_results_payload['task']}}\n"
+    f"Best Epoch:  {{_results_payload['best_epoch']}}\n"
+    f"Epochs Run:  {{_results_payload['epochs_run']}}\n"
+    f"Monitor:     {{_results_payload['monitor']}}\n"
+    f"Device:      {{DEVICE}}\n"
+    f"Metrics:     {{json.dumps(metrics, indent=2)}}\n"
+    "============================================================\n"
+)
+try:
+    with open(_logs_dir / "summary.log", "w", encoding="utf-8") as _lf:
+        _lf.write(_summary_log)
+    with open(_logs_dir / "train.log", "a", encoding="utf-8") as _lf:
+        _lf.write(_summary_log)
+    _files["summary_log"] = "logs/summary.log"
+    _files["train_log"] = "logs/train.log"
+
+    _exp_root = pathlib.Path("experiments")
+    if _exp_root.is_dir():
+        _exp_target = _exp_root / (_run.run_name if _run else str({id:?}).replace("/", "_").replace("@", "_"))
+        _exp_logs = _exp_target / "logs"
+        _exp_logs.mkdir(parents=True, exist_ok=True)
+        with open(_exp_logs / "summary.log", "w", encoding="utf-8") as _lf:
+            _lf.write(_summary_log)
+        with open(_exp_logs / "train.log", "a", encoding="utf-8") as _lf:
+            _lf.write(_summary_log)
+except Exception as _log_err:
+    print(f"log writing skipped: {{_log_err}}", flush=True)
 
 try:
     import matplotlib

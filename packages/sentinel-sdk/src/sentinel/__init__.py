@@ -57,10 +57,12 @@ class Run:
         self.artifacts_dir = self.run_dir / "artifacts"
         self.plots_dir = self.artifacts_dir / "plots"
         self.results_dir = self.artifacts_dir / "results"
+        self.logs_dir = self.artifacts_dir / "logs"
 
         self._setup_mlflow_dirs()
         self._set_env_dirs()
         self._write_run_meta(status="RUNNING")
+        self.log_message(f"Initialized experiment run '{self.run_name}' (ID: {self.run_id})")
         _patch_matplotlib_if_loaded()
 
         # Record standard tags
@@ -85,6 +87,7 @@ class Run:
         os.environ["SENTINEL_ARTIFACT_DIR"] = str(self.artifacts_dir.resolve())
         os.environ["SENTINEL_PLOTS_DIR"] = str(self.plots_dir.resolve())
         os.environ["SENTINEL_RESULTS_DIR"] = str(self.results_dir.resolve())
+        os.environ["SENTINEL_LOGS_DIR"] = str(self.logs_dir.resolve())
         os.environ["SENTINEL_RUN_ID"] = str(self.run_id)
         os.environ["SENTINEL_EXPERIMENT_ID"] = str(self.experiment_id)
 
@@ -108,6 +111,7 @@ class Run:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.plots_dir.mkdir(parents=True, exist_ok=True)
         self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
     def _write_run_meta(self, status: str = "RUNNING", end_time_ms: Optional[int] = None):
         meta_file = self.run_dir / "meta.yaml"
@@ -232,11 +236,36 @@ class Run:
     def get_results_dir(self) -> Path:
         return self.results_dir
 
+    def get_logs_dir(self) -> Path:
+        return self.logs_dir
+
     def get_run_dir(self) -> Path:
         return self.run_dir
 
     def get_artifact_dir(self) -> Path:
         return self.artifacts_dir
+
+    def log_message(self, message: str, level: str = "INFO"):
+        """Append a timestamped log line to logs/train.log inside the experiment/run directory."""
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{now_str}] [{level.upper()}] {message}\n"
+        log_file = self.logs_dir / "train.log"
+        try:
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+
+        # Also mirror to experiments/<run_name>/logs/train.log if experiments/ exists
+        exp_root = Path("experiments")
+        if exp_root.is_dir():
+            exp_logs = exp_root / self.run_name / "logs"
+            try:
+                exp_logs.mkdir(parents=True, exist_ok=True)
+                with open(exp_logs / "train.log", "a", encoding="utf-8") as f:
+                    f.write(line)
+            except Exception:
+                pass
 
     def finish(self, status: str = "FINISHED"):
         if not self.is_active:
@@ -244,11 +273,44 @@ class Run:
         end_time_ms = int(time.time() * 1000)
         self._write_run_meta(status=status, end_time_ms=end_time_ms)
         self.is_active = False
+
+        duration_s = (end_time_ms - self.start_time_ms) / 1000
+        summary_text = (
+            f"============================================================\n"
+            f"EXPERIMENT EXECUTION SUMMARY: {self.run_name}\n"
+            f"Run ID:         {self.run_id}\n"
+            f"Experiment ID:  {self.experiment_id}\n"
+            f"Final Status:   {status}\n"
+            f"Started:        {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(self.start_time_ms / 1000))}\n"
+            f"Finished:       {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time_ms / 1000))}\n"
+            f"Duration:       {duration_s:.2f}s\n"
+            f"Total Steps:    {self.current_step}\n"
+            f"Artifacts Dir:  {self.artifacts_dir.resolve()}\n"
+            f"Logs Dir:       {self.logs_dir.resolve()}\n"
+            f"============================================================\n"
+        )
+        try:
+            with open(self.logs_dir / "summary.log", "w", encoding="utf-8") as sf:
+                sf.write(summary_text)
+        except Exception:
+            pass
+
+        exp_root = Path("experiments")
+        if exp_root.is_dir():
+            exp_logs = exp_root / self.run_name / "logs"
+            try:
+                exp_logs.mkdir(parents=True, exist_ok=True)
+                with open(exp_logs / "summary.log", "w", encoding="utf-8") as sf:
+                    sf.write(summary_text)
+            except Exception:
+                pass
+
         for var in [
             "SENTINEL_RUN_DIR",
             "SENTINEL_ARTIFACT_DIR",
             "SENTINEL_PLOTS_DIR",
             "SENTINEL_RESULTS_DIR",
+            "SENTINEL_LOGS_DIR",
             "SENTINEL_RUN_ID",
             "SENTINEL_EXPERIMENT_ID",
         ]:
@@ -452,6 +514,22 @@ def get_results_dir() -> Path:
     d = Path(os.environ.get("SENTINEL_RESULTS_DIR", "artifacts/results"))
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+@_safe_call(default_return=Path("artifacts/logs"))
+def get_logs_dir() -> Path:
+    global _current_run
+    if _current_run is not None:
+        return _current_run.get_logs_dir()
+    d = Path(os.environ.get("SENTINEL_LOGS_DIR", "artifacts/logs"))
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+@_safe_call(default_return=None)
+def log_message(message: str, level: str = "INFO"):
+    """Logs a timestamped message into the active experiment's logs/train.log."""
+    global _current_run
+    if _current_run is not None:
+        _current_run.log_message(message, level=level)
 
 @_safe_call(default_return=Path("."))
 def get_run_dir() -> Path:
