@@ -261,6 +261,23 @@ my-sentinel-project/
    - Sentinel's Python SDK automatically intercepts `plt.savefig()` and redirects output to `<run_dir>/artifacts/plots/` to prevent root directory pollution.
    - If running custom scripts, the agent must explicitly point all outputs to `experiments/<experiment_name>/` and verify after execution that the root directory remains pristine.
 
+### Creating Custom Components & "Staying Within Sentinel"
+> [!NOTE]
+> **It is 100% fine, encouraged, and supported to create custom components, compound blocks, neural architectures, and experiment recipes — but you MUST STAY WITHIN SENTINEL:**
+>
+> 1. **Custom Components Belong in `components/custom/<name>.yaml` (Tier 3):**  
+>    Do not invent external wrapper scripts or custom JSON/runner formats. Author your declarative DAGs using Sentinel's component specification (`schema_version: "1.0"`), typed parameters, and dynamic tensor port shapes.
+> 2. **Custom PyTorch Models Belong in `models/`:**  
+>    Implement clean, standard PyTorch classes (`torch.nn.Module`). Do not wrap them in proprietary framework base classes or complex metaclasses.
+> 3. **Custom Experiment Configs Belong in `configs/experiment/<name>.yaml`:**  
+>    Define your hyperparameters and dataset overrides cleanly using hierarchical YAML composable with Hydra.
+> 4. **Isolate All Outputs in `experiments/<name>/`:**  
+>    Every run must output strictly into its own dedicated folder under `experiments/<name>/` with subfolders for `results/`, `plots/`, `checkpoints/`, and `logs/`. Zero stray files in the repository root.
+> 5. **Always Validate Before Launching:**  
+>    Run `sentinel component check components/custom/<name>.yaml` to verify port dimension compatibility, parameter range constraints, and acyclic graphs.
+> 6. **Leverage Sentinel Hub for Sharing:**  
+>    Custom components that follow Sentinel standards can be published directly to **Sentinel Hub** with `sentinel push components/custom/<name>.yaml` for seamless reuse across machines and projects.
+
 ### Strict Agent Invariants (How to Avoid Deviating)
 1. **Never invent custom runner frameworks or bash launchers:**  
    Sentinel's Rust daemon (`sentinel dev`) supervises execution, tracks PIDs, and monitors GPU resources. Agents do not need to create background process scripts or custom daemon wrappers.
@@ -463,6 +480,32 @@ sentinel add vit-tiny --global
 sentinel push components/tabular/my-mlp.yaml
 sentinel publish components/tabular/my-mlp.yaml
 ```
+
+### Sentinel Hub Ecosystem & Community Registry
+Sentinel Hub is the decentralized public registry for sharing verified component templates, neural blocks, and modular capability packs:
+- **Hub Repository**: `https://github.com/rimraf-adi/sentinel-hub` (or local instance at `http://localhost:3345`).
+- **Browsing & Adding Components**:
+  ```bash
+  # Install components directly from Sentinel Hub into ./components/
+  sentinel add vision/vit-tiny
+  
+  # Install into user-global templates (~/.sentinel/templates)
+  sentinel add vision/vit-tiny --global
+  ```
+- **Capability Packs & Integrations**:
+  ```bash
+  # List all modular capability packs available from Sentinel Hub
+  sentinel integrate list
+  
+  # Install on-demand integrations (e.g. explainable AI, advanced gradient inspection)
+  sentinel integrate add xai
+  ```
+- **Publishing Live to Sentinel Hub**:
+  ```bash
+  # Push your validated custom component to the community registry
+  sentinel push components/custom/my_experiment.yaml
+  sentinel publish components/custom/my_experiment.yaml
+  ```
 
 ### Component Validation Rules
 Run `sentinel component check <path>` before committing or launching jobs. Validation verifies:

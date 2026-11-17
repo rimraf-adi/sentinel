@@ -44,12 +44,13 @@ curl -s http://localhost:2512/api/health || {
 ```
 
 > [!IMPORTANT]
-> **Anti-Deviation & Directory Policy:**  
-> The agent MUST read and adhere to `SENTINEL.md`:
+> **Anti-Deviation & Directory Policy ("Stay Within Sentinel"):**  
+> Creating custom components, neural architectures, compound blocks, and experiment recipes is fully encouraged, but agents MUST **stay within Sentinel**:
 > 1. **Configs & Experiments Hierarchy**: Maintain all configurations under `configs/` (`configs/model/`, `configs/dataset/`, `configs/experiment/`).
 > 2. **One Experiment, One Directory**: Every experiment or training run must write strictly to its own dedicated directory under `experiments/<experiment_name>/` (with `results/`, `plots/`, `checkpoints/`, `logs/`).
 > 3. **Zero Stray Result Files**: Never output `.png`, `.pt`, `.onnx`, `.json`, or `.log` files in the repository root or arbitrary subfolders.
-> 4. **No Custom Frameworks**: Never invent arbitrary top-level directories (`src/`, `trainers/`, etc.), never write custom runner scripts or subprocess managers (let Sentinel supervise), keep models in `models/` as pure standard PyTorch `nn.Module`, and always use `uv run`.
+> 4. **No Custom Frameworks or Wrappers**: Never invent arbitrary top-level directories (`src/`, `trainers/`, etc.), never write custom runner scripts or subprocess managers (let Sentinel supervise), and keep models in `models/` as pure standard PyTorch `nn.Module`.
+> 5. **Sentinel Hub Sharing**: Install community templates with `sentinel add <name>` and publish your custom components to Sentinel Hub with `sentinel push <path>`. Always run `sentinel component check <path>` before launching.
 
 ---
 
