@@ -137,7 +137,7 @@ sentinel/
 * **`src/models.rs`**: Canonical domain structs: `JobSpec` (execution parameters), `JobRecord` (live status & exit codes), `JobStatus`, `RunMode` (`Command`, `Sdk`, `Framework`), `HardwareStats`, `GpuStats`, `MetricPoint`, and `MachineSpec`.
 * **`src/config.rs`**: Implements `HydraConfig` supporting hierarchical YAML composition and arbitrary dot-path overrides (e.g. `model.backbone.encoder.layers=12`).
 * **`src/components.rs`**: Core declarative component engine. Handles YAML parsing, parameter schema validation (types, ranges, choice options), locked fields protection, component inheritance resolution (`extends:`), custom component starter creation, and freezing runs into components.
-* **`src/scaffold.rs`**: `ProjectScaffolder` engine used by `sentinel new` to generate a production-ready repository with `sentinel.yaml` (human settings), `sentinel.lock` (machine state), `machines.yaml`, and folder conventions.
+* **`src/scaffold.rs`**: `ProjectScaffolder` engine used by `sentinel new` and `sentinel init` to generate a production-ready repository with `sentinel.yaml` (human settings), `sentinel.lock` (machine state), `machines.yaml`, `SENTINEL.md` (agent operational manual & anti-deviation rules), and canonical folder conventions.
 * **`src/export.rs`**: `ScriptExporter` translates component specs into standalone, pure bare PyTorch scripts with zero runtime dependencies on Sentinel or Lightning.
 * **`src/storage.rs`**: Storage abstractions for tracking runs in MLflow-native layout.
 * **`tests/test_edge_cases.rs`**: Integration test suite verifying 3-level component inheritance, numeric range enforcement, choice validation, locked parameter barriers, and malformed YAML handling.

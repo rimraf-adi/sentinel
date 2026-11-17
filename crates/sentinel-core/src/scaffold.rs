@@ -3,6 +3,8 @@
 use std::fs;
 use std::path::Path;
 
+pub const SENTINEL_MD_TEMPLATE: &str = include_str!("../../../SENTINEL.md");
+
 pub struct ProjectScaffolder;
 
 impl ProjectScaffolder {
@@ -59,9 +61,11 @@ answers:
   tracking: "mlflow"
 files:
   sentinel.yaml: {{ owner: "managed" }}
+  sentinel.lock: {{ owner: "managed" }}
   machines.yaml: {{ owner: "managed" }}
   configs/base.yaml: {{ owner: "scaffolded" }}
   models/example_model.py: {{ owner: "scaffolded" }}
+  SENTINEL.md: {{ owner: "managed" }}
 "#,
             chrono::Utc::now().to_rfc3339()
         );
@@ -198,6 +202,9 @@ locked:
             custom_component_yaml,
         )?;
 
+        // 11. SENTINEL.md (Agent operational manual & anti-deviation rules)
+        fs::write(target_dir.join("SENTINEL.md"), SENTINEL_MD_TEMPLATE)?;
+
         Ok(())
     }
 
@@ -260,6 +267,8 @@ answers:
 files:
   sentinel.yaml: {{ owner: "managed" }}
   sentinel.lock: {{ owner: "managed" }}
+  machines.yaml: {{ owner: "managed" }}
+  SENTINEL.md: {{ owner: "managed" }}
 "#,
                 chrono::Utc::now().to_rfc3339()
             );
@@ -279,6 +288,12 @@ machines:
     gpus: "auto"
 "#;
             fs::write(machines_path, machines_yaml)?;
+        }
+
+        // 4. Write SENTINEL.md if missing
+        let sentinel_md_path = target_dir.join("SENTINEL.md");
+        if !sentinel_md_path.exists() {
+            fs::write(sentinel_md_path, SENTINEL_MD_TEMPLATE)?;
         }
 
         Ok(())
@@ -304,6 +319,7 @@ mod tests {
         assert!(temp_dir.join("components/custom/my_component.yaml").exists());
         assert!(temp_dir.join("pyproject.toml").exists());
         assert!(temp_dir.join(".gitignore").exists());
+        assert!(temp_dir.join("SENTINEL.md").exists());
 
         // Validate YAML parsing of generated files
         let sentinel_content =
@@ -337,6 +353,8 @@ mod tests {
         assert!(ProjectScaffolder::is_sentinel_repo(&temp_dir));
         assert!(temp_dir.join("sentinel.lock").exists());
         assert!(temp_dir.join("sentinel.yaml").exists());
+        assert!(temp_dir.join("machines.yaml").exists());
+        assert!(temp_dir.join("SENTINEL.md").exists());
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

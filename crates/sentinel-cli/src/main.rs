@@ -1110,6 +1110,8 @@ async fn main() -> anyhow::Result<()> {
             println!("Scaffolding new Sentinel project in: {}", target_path.display());
             ProjectScaffolder::scaffold(target_path, &name)?;
             println!("✨ Successfully created project '{name}'!");
+            println!("   Generated: sentinel.lock (lockfile), sentinel.yaml, machines.yaml, and SENTINEL.md");
+            println!("   SENTINEL.md contains strict operational rules and conventions for AI coding agents.");
             println!("\nNext steps:");
             println!("  cd {name}");
             println!("  sentinel component list");
@@ -1126,7 +1128,8 @@ async fn main() -> anyhow::Result<()> {
             println!("Initializing Sentinel in: {}", target_path.display());
             ProjectScaffolder::init(target_path, project_name)?;
             println!("✨ Successfully converted '{project_name}' into a Sentinel repository!");
-            println!("   Generated: sentinel.lock (lockfile), sentinel.yaml, and machines.yaml");
+            println!("   Generated: sentinel.lock (lockfile), sentinel.yaml, machines.yaml, and SENTINEL.md");
+            println!("   SENTINEL.md contains strict operational rules and conventions for AI coding agents.");
             println!("\nNext steps:");
             println!("   sentinel component list");
             println!("   sentinel dev");

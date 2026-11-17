@@ -31,17 +31,21 @@ This skill provides autonomous AI coding agents with the instructions, tools, an
 When an agent enters a workspace, execute the following detection routine:
 
 ```bash
-# Check if Sentinel is present
-if [ -f "sentinel.yaml" ] || [ -d "components" ]; then
-    echo "Sentinel codebase detected."
+# 1. Check if Sentinel is present and read SENTINEL.md for strict invariants
+if [ -f "SENTINEL.md" ] || [ -f "sentinel.yaml" ]; then
+    echo "Sentinel codebase detected. Follow SENTINEL.md rules strictly without deviating."
 fi
 
-# Ensure local daemon is running (default port: 2512)
+# 2. Ensure local daemon is running (default port: 2512)
 curl -s http://localhost:2512/api/health || {
     echo "Starting Sentinel daemon..."
     target/debug/sentinel dev &
 }
 ```
+
+> [!IMPORTANT]
+> **Anti-Deviation Policy:**  
+> The agent MUST read and adhere to `SENTINEL.md`. Never invent arbitrary top-level directories (`src/`, `trainers/`, etc.), never write custom runner scripts or subprocess managers (let Sentinel supervise), keep models in `models/` as pure standard PyTorch `nn.Module`, and always use `uv run`.
 
 ---
 
