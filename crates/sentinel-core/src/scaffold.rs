@@ -16,6 +16,8 @@ impl ProjectScaffolder {
         let subdirs = [
             "configs/model",
             "configs/dataset",
+            "configs/experiment",
+            "experiments",
             "tasks",
             "models",
             "datasets",
@@ -64,7 +66,9 @@ files:
   sentinel.lock: {{ owner: "managed" }}
   machines.yaml: {{ owner: "managed" }}
   configs/base.yaml: {{ owner: "scaffolded" }}
+  configs/experiment/baseline.yaml: {{ owner: "scaffolded" }}
   models/example_model.py: {{ owner: "scaffolded" }}
+  experiments/.gitkeep: {{ owner: "scaffolded" }}
   SENTINEL.md: {{ owner: "managed" }}
 "#,
             chrono::Utc::now().to_rfc3339()
@@ -202,7 +206,38 @@ locked:
             custom_component_yaml,
         )?;
 
-        // 11. SENTINEL.md (Agent operational manual & anti-deviation rules)
+        // 11. configs/experiment/baseline.yaml (One experiment, one directory principle)
+        let baseline_experiment_yaml = r#"# Experiment configuration (Hydra-compatible)
+# Strict Invariant: One experiment per directory under experiments/<experiment_name>/
+name: "baseline"
+description: "Baseline experiment recipe"
+
+defaults:
+  - override /model: resnet18
+  - override /dataset: synthetic
+
+training:
+  lr: 0.0003
+  epochs: 10
+  batch_size: 64
+
+output:
+  dir: "experiments/baseline"
+"#;
+        fs::write(
+            target_dir.join("configs/experiment/baseline.yaml"),
+            baseline_experiment_yaml,
+        )?;
+
+        // 12. experiments/.gitkeep (Enforcing experiments structure & no stray result files)
+        let gitkeep = r#"# Sentinel Experiments Directory
+# Strict Policy: One experiment per directory (e.g. experiments/<experiment_name>/).
+# All results, metrics, plots, and checkpoints must remain inside each experiment directory.
+# Zero stray result files in the project root.
+"#;
+        fs::write(target_dir.join("experiments/.gitkeep"), gitkeep)?;
+
+        // 13. SENTINEL.md (Agent operational manual & anti-deviation rules)
         fs::write(target_dir.join("SENTINEL.md"), SENTINEL_MD_TEMPLATE)?;
 
         Ok(())
@@ -220,6 +255,8 @@ locked:
 
         let subdirs = [
             "configs",
+            "configs/experiment",
+            "experiments",
             "models",
             "datasets",
             "components/custom",
@@ -268,6 +305,7 @@ files:
   sentinel.yaml: {{ owner: "managed" }}
   sentinel.lock: {{ owner: "managed" }}
   machines.yaml: {{ owner: "managed" }}
+  experiments/.gitkeep: {{ owner: "managed" }}
   SENTINEL.md: {{ owner: "managed" }}
 "#,
                 chrono::Utc::now().to_rfc3339()
@@ -290,7 +328,16 @@ machines:
             fs::write(machines_path, machines_yaml)?;
         }
 
-        // 4. Write SENTINEL.md if missing
+        // 4. Write experiments/.gitkeep if missing
+        let gitkeep_path = target_dir.join("experiments/.gitkeep");
+        if !gitkeep_path.exists() {
+            let _ = fs::write(
+                gitkeep_path,
+                "# Sentinel Experiments Directory\n# Strict Policy: One experiment per directory (e.g. experiments/<experiment_name>/).\n# All results, metrics, plots, and checkpoints must remain inside each experiment directory.\n# Zero stray result files in the project root.\n",
+            );
+        }
+
+        // 5. Write SENTINEL.md if missing
         let sentinel_md_path = target_dir.join("SENTINEL.md");
         if !sentinel_md_path.exists() {
             fs::write(sentinel_md_path, SENTINEL_MD_TEMPLATE)?;
@@ -315,6 +362,9 @@ mod tests {
         assert!(temp_dir.join("configs/base.yaml").exists());
         assert!(temp_dir.join("configs/model/resnet18.yaml").exists());
         assert!(temp_dir.join("configs/dataset/synthetic.yaml").exists());
+        assert!(temp_dir.join("configs/experiment/baseline.yaml").exists());
+        assert!(temp_dir.join("experiments").exists());
+        assert!(temp_dir.join("experiments/.gitkeep").exists());
         assert!(temp_dir.join("models/example_model.py").exists());
         assert!(temp_dir.join("components/custom/my_component.yaml").exists());
         assert!(temp_dir.join("pyproject.toml").exists());
@@ -354,6 +404,8 @@ mod tests {
         assert!(temp_dir.join("sentinel.lock").exists());
         assert!(temp_dir.join("sentinel.yaml").exists());
         assert!(temp_dir.join("machines.yaml").exists());
+        assert!(temp_dir.join("experiments").exists());
+        assert!(temp_dir.join("experiments/.gitkeep").exists());
         assert!(temp_dir.join("SENTINEL.md").exists());
 
         // Clean up

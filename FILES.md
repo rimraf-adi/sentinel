@@ -71,6 +71,8 @@ sentinel/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── src/                            # App.tsx, api.ts, pages/*, builder/* (drag & drop component graph)
+├── configs/                            # Hierarchical YAML configs (base.yaml, model/, dataset/, experiment/)
+├── experiments/                        # Isolated experiment output runs ("one experiment = one directory")
 ├── components/                         # Component library: graph components (ANN, LSTM, CNN, ...) and recipes
 ├── packages/
 │   └── sentinel-sdk/                   # Thin Python SDK with safe-tracking wrapper

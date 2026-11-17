@@ -44,8 +44,12 @@ curl -s http://localhost:2512/api/health || {
 ```
 
 > [!IMPORTANT]
-> **Anti-Deviation Policy:**  
-> The agent MUST read and adhere to `SENTINEL.md`. Never invent arbitrary top-level directories (`src/`, `trainers/`, etc.), never write custom runner scripts or subprocess managers (let Sentinel supervise), keep models in `models/` as pure standard PyTorch `nn.Module`, and always use `uv run`.
+> **Anti-Deviation & Directory Policy:**  
+> The agent MUST read and adhere to `SENTINEL.md`:
+> 1. **Configs & Experiments Hierarchy**: Maintain all configurations under `configs/` (`configs/model/`, `configs/dataset/`, `configs/experiment/`).
+> 2. **One Experiment, One Directory**: Every experiment or training run must write strictly to its own dedicated directory under `experiments/<experiment_name>/` (with `results/`, `plots/`, `checkpoints/`, `logs/`).
+> 3. **Zero Stray Result Files**: Never output `.png`, `.pt`, `.onnx`, `.json`, or `.log` files in the repository root or arbitrary subfolders.
+> 4. **No Custom Frameworks**: Never invent arbitrary top-level directories (`src/`, `trainers/`, etc.), never write custom runner scripts or subprocess managers (let Sentinel supervise), keep models in `models/` as pure standard PyTorch `nn.Module`, and always use `uv run`.
 
 ---
 

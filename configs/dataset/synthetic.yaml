@@ -1,0 +1,5 @@
+# Dataset configuration
+name: "synthetic"
+num_samples: 128
+image_size: [3, 32, 32]
+num_classes: 10

@@ -1,0 +1,4 @@
+# Sentinel Experiments Directory
+# Strict Policy: One experiment per directory (e.g. experiments/<experiment_name>/).
+# All results, metrics, plots, and checkpoints must remain inside each experiment directory.
+# Zero stray result files in the project root.

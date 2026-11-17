@@ -1,0 +1,4 @@
+# Model configuration
+name: "resnet18"
+pretrained: true
+num_classes: 10

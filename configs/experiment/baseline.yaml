@@ -1,0 +1,16 @@
+# Experiment configuration (Hydra-compatible)
+# Strict Invariant: One experiment per directory under experiments/<experiment_name>/
+name: "baseline"
+description: "Baseline experiment recipe"
+
+defaults:
+  - override /model: resnet18
+  - override /dataset: synthetic
+
+training:
+  lr: 0.0003
+  epochs: 10
+  batch_size: 64
+
+output:
+  dir: "experiments/baseline"
